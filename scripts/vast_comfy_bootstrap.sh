@@ -8,6 +8,7 @@ set -Eeuo pipefail
 H3_VAST_BOOTSTRAP_LIB_ONLY="${H3_VAST_BOOTSTRAP_LIB_ONLY:-0}"
 H3_BOOTSTRAP_STATUS_FILE="${H3_BOOTSTRAP_STATUS_FILE:-/run/h3/bootstrap.json}"
 H3_BOOTSTRAP_LOG_FILE="${H3_BOOTSTRAP_LOG_FILE:-/var/log/h3/bootstrap.log}"
+H3_BOOTSTRAP_TRACE_FILE="${H3_BOOTSTRAP_TRACE_FILE:-/run/h3/bootstrap.log}"
 H3_BOOTSTRAP_TIMEOUT_SECONDS="${H3_BOOTSTRAP_TIMEOUT_SECONDS:-300}"
 H3_COMFY_DIR="${H3_COMFY_DIR:-/opt/workspace-internal/ComfyUI}"
 H3_COMFY_PYTHON="${H3_COMFY_PYTHON:-/venv/main/bin/python3}"
@@ -21,6 +22,7 @@ H3_COMFY_PORT="${H3_COMFY_PORT:-18188}"
 H3_STATUS_PYTHON="${H3_STATUS_PYTHON:-python3}"
 H3_GATEWAY_PID=""
 H3_BOOTSTRAP_SUCCEEDED=0
+H3_BOOTSTRAP_STAGE="starting"
 
 _write_bootstrap_status_unlocked() {
   local stage="$1" progress="$2" message="$3" error="${4:-}"
@@ -190,22 +192,32 @@ cleanup() {
 on_exit() {
   local code=$?
   if (( code != 0 && H3_BOOTSTRAP_SUCCEEDED == 0 )); then
-    write_bootstrap_status "bootstrap_failed" 0 "H3 部署失败" "部署脚本未完成" || true
+    write_bootstrap_status "bootstrap_failed" 0 "H3 部署失败" "阶段=${H3_BOOTSTRAP_STAGE}; exit_code=${code}" || true
   fi
   cleanup
 }
 
 run_bootstrap() {
-  mkdir -p "$(dirname "$H3_BOOTSTRAP_LOG_FILE")" /run/h3
-  exec > >(tee -a "$H3_BOOTSTRAP_LOG_FILE") 2>&1
+  mkdir -p "$(dirname "$H3_BOOTSTRAP_LOG_FILE")" "$(dirname "$H3_BOOTSTRAP_TRACE_FILE")" /run/h3
+  exec > >(tee -a "$H3_BOOTSTRAP_LOG_FILE" "$H3_BOOTSTRAP_TRACE_FILE") 2>&1
+  H3_BOOTSTRAP_STAGE="waiting_for_base"
   write_bootstrap_status "starting" 0 "正在初始化 Vast ComfyUI"
   wait_for_vast_comfy_base || { write_bootstrap_status "bootstrap_failed" 0 "Vast 基础环境未就绪" "等待基础环境超时"; return 1; }
+  H3_BOOTSTRAP_STAGE="installing_worker_runtime"
   install_worker_runtime
+  H3_BOOTSTRAP_STAGE="fast_bootstrap"
   start_worker_gateway
   write_bootstrap_status "installing_h3" 0.2 "正在执行 H3 Fast 初始化"
   local fast_script
   fast_script="$(download_fast_script)"
-  H3_USE_VAST_COMFY_BASE=1 H3_BOOTSTRAP_STATUS_FILE="$H3_BOOTSTRAP_STATUS_FILE" bash "$fast_script"
+  if H3_USE_VAST_COMFY_BASE=1 H3_BOOTSTRAP_STATUS_FILE="$H3_BOOTSTRAP_STATUS_FILE" bash "$fast_script"; then
+    :
+  else
+    local fast_exit_code=$?
+    write_bootstrap_status "bootstrap_failed" 0 "H3 Fast 初始化失败" "阶段=${H3_BOOTSTRAP_STAGE}; exit_code=${fast_exit_code}"
+    return "$fast_exit_code"
+  fi
+  H3_BOOTSTRAP_STAGE="runtime_startup"
   write_bootstrap_status "downloading_models" 0.78 "正在校验 H3 模型"
   PYTHONPATH="$H3_RUNTIME_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
     MODEL_CACHE_DIR="$H3_COMFY_DIR/models" \
@@ -216,6 +228,7 @@ run_bootstrap() {
       --backend-root "$H3_RUNTIME_ROOT/backends" \
       --model-cache "$H3_COMFY_DIR/models" \
       --runtime-config "${H3_RUNTIME_CONFIG:-/run/h3/runtime.json}"
+  H3_BOOTSTRAP_STAGE="health_check"
   write_bootstrap_status "starting_comfyui" 0.9 "正在确认 ComfyUI 已启动"
   wait_for_comfyui
   write_bootstrap_status "ready" 1 "H3 Worker 已就绪"
