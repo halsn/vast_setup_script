@@ -10,7 +10,7 @@ H3_BOOTSTRAP_STATUS_FILE="${H3_BOOTSTRAP_STATUS_FILE:-/run/h3/bootstrap.json}"
 H3_BOOTSTRAP_LOG_FILE="${H3_BOOTSTRAP_LOG_FILE:-/var/log/h3/bootstrap.log}"
 H3_BOOTSTRAP_TRACE_FILE="${H3_BOOTSTRAP_TRACE_FILE:-/run/h3/bootstrap.log}"
 H3_BOOTSTRAP_TIMEOUT_SECONDS="${H3_BOOTSTRAP_TIMEOUT_SECONDS:-300}"
-H3_COMFY_DIR="${H3_COMFY_DIR:-/opt/workspace-internal/ComfyUI}"
+H3_COMFY_DIR="${H3_COMFY_DIR:-}"
 H3_COMFY_PYTHON="${H3_COMFY_PYTHON:-/venv/main/bin/python3}"
 H3_COMFY_SERVICE="${H3_COMFY_SERVICE:-comfyui}"
 H3_BUNDLE_ROOT="${H3_BUNDLE_ROOT:-}"
@@ -81,12 +81,28 @@ wait_for_vast_comfy_base() {
 }
 
 resolve_vast_comfy_base() {
-  local candidate
+  local candidate process_pid process_dir
+
+  # The official Vast image can expose an internal copy under /opt while
+  # Supervisor runs the user-facing checkout under /workspace.  Follow the
+  # running ComfyUI process first so models and custom nodes are installed in
+  # the directory that the service actually loads.
+  if [[ -z "$H3_COMFY_DIR" ]]; then
+    while IFS= read -r process_pid; do
+      [[ "$process_pid" =~ ^[0-9]+$ ]] || continue
+      process_dir="$(readlink -f "/proc/$process_pid/cwd" 2>/dev/null || true)"
+      if [[ -f "$process_dir/main.py" ]]; then
+        H3_COMFY_DIR="$process_dir"
+        break
+      fi
+    done < <(pgrep -f 'python.*main.py' 2>/dev/null || true)
+  fi
+
   local candidates=(
     "$H3_COMFY_DIR"
-    "/opt/workspace-internal/ComfyUI"
     "/workspace/ComfyUI"
     "/workspace/comfyui"
+    "/opt/workspace-internal/ComfyUI"
     "/opt/ComfyUI"
     "/opt/comfyui"
     "/root/ComfyUI"
