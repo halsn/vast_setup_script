@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "sdpa": {
+      "attention": "sdpa",
+      "spectrum_degree": 0,
+      "convrot": null,
+      "nvfp4": false,
+      "torch_compile": false,
+      "cpu_offload": "high",
+      "resolution_preset": "low",
+      "enabled_features": []
+    },
+    "sage_sm86": {
+      "attention": "sage_sm86",
+      "spectrum_degree": 0,
+      "convrot": "int8",
+      "nvfp4": false,
+      "torch_compile": false,
+      "cpu_offload": "high",
+      "resolution_preset": "low",
+      "enabled_features": ["sageattention", "int8_convrot"]
+    },
+    "sage_sm89": {
+      "attention": "sage_sm89",
+      "spectrum_degree": 1,
+      "convrot": "int8",
+      "nvfp4": false,
+      "torch_compile": false,
+      "cpu_offload": "medium",
+      "resolution_preset": "standard",
+      "enabled_features": ["sageattention", "spectrum", "int8_convrot"]
+    },
+    "sage_sm90": {
+      "attention": "sage_sm90",
+      "spectrum_degree": 1,
+      "convrot": "int8",
+      "nvfp4": false,
+      "torch_compile": true,
+      "cpu_offload": "low",
+      "resolution_preset": "high",
+      "enabled_features": ["sageattention", "spectrum", "int8_convrot", "torch_compile"]
+    },
+    "sage_sm120": {
+      "attention": "sage_sm120",
+      "spectrum_degree": 1,
+      "convrot": "int8",
+      "nvfp4": true,
+      "torch_compile": true,
+      "cpu_offload": "low",
+      "resolution_preset": "high",
+      "enabled_features": ["sageattention", "spectrum", "int8_convrot", "nvfp4", "torch_compile"]
+    }
+  },
+  "architectures": {
+    "sm86": {
+      "architecture": "sm86",
+      "backend": "sage_sm86",
+      "path": "sm86",
+      "module": "sageattention"
+    },
+    "sm89": {
+      "architecture": "sm89",
+      "backend": "sage_sm89",
+      "path": "sm89",
+      "module": "sageattention"
+    },
+    "sm90": {
+      "architecture": "sm90",
+      "backend": "sage_sm90",
+      "path": "sm90",
+      "module": "sageattention"
+    },
+    "sm120": {
+      "architecture": "sm120",
+      "backend": "sage_sm120",
+      "path": "sm120",
+      "module": "sageattention"
+    }
+  }
+}

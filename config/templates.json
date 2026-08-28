@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "templates": [
+    {
+      "id": "h3_t2v",
+      "display_name": "H3 文生视频",
+      "mode": "t2v",
+      "workflow": "H3_T2V_Accelerated.json",
+      "required_models": [
+        "minimax-h3-fl2va-pruned-int8-convrot",
+        "qwen3vl-32b-minimax-h3-nvfp4-awq",
+        "minimax-h3-video-vae-fp16",
+        "minimax-h3-audio-vae-fp32"
+      ],
+      "features": ["h3"],
+      "min_protocol_version": 1
+    },
+    {
+      "id": "h3_i2v",
+      "display_name": "H3 图生视频",
+      "mode": "i2v",
+      "workflow": "H3_I2V_Accelerated.json",
+      "required_models": [
+        "minimax-h3-fl2va-pruned-int8-convrot",
+        "qwen3vl-32b-minimax-h3-nvfp4-awq",
+        "minimax-h3-video-vae-fp16",
+        "minimax-h3-audio-vae-fp32"
+      ],
+      "features": ["h3", "image_input"],
+      "min_protocol_version": 1
+    },
+    {
+      "id": "h3_r2v",
+      "display_name": "H3 参考生视频",
+      "mode": "r2v",
+      "workflow": "H3_R2V_Accelerated.json",
+      "required_models": [
+        "minimax-h3-ref2va-pruned-int8-convrot",
+        "qwen3vl-32b-minimax-h3-nvfp4-awq",
+        "minimax-h3-video-vae-fp16",
+        "minimax-h3-audio-vae-fp32"
+      ],
+      "features": ["h3", "reference_input"],
+      "min_protocol_version": 1
+    },
+    {
+      "id": "h3_fast_turbo",
+      "display_name": "H3 Fast Turbo",
+      "mode": "t2v",
+      "workflow": "H3_Fast_Turbo.json",
+      "required_models": [
+        "minimax-h3-fl2va-pruned-int8-convrot",
+        "qwen3vl-32b-minimax-h3-nvfp4-awq",
+        "minimax-h3-video-vae-fp16",
+        "minimax-h3-audio-vae-fp32"
+      ],
+      "features": ["h3", "turbo"],
+      "min_protocol_version": 1
+    }
+  ]
+}
