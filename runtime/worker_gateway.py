@@ -14,6 +14,7 @@ from aiohttp import ClientError, ClientSession, WSMsgType, web
 from yarl import URL
 
 from runtime.worker_readiness import ReadinessError, build_ready_payload
+from runtime.workflow_builder import WorkflowBuildError, build_h3_prompt
 
 
 ALLOWED_PATHS = frozenset(
@@ -74,6 +75,7 @@ class GatewayConfig:
 
 CONFIG_KEY = web.AppKey("gateway_config", GatewayConfig)
 SESSION_KEY = web.AppKey("http_session", ClientSession)
+JOB_MAPPINGS_KEY = web.AppKey("job_mappings", dict)
 
 
 class GatewayError(Exception):
@@ -143,6 +145,7 @@ def create_app(
     )
     app = web.Application(middlewares=[_gateway_middleware], client_max_size=None)
     app[CONFIG_KEY] = config
+    app[JOB_MAPPINGS_KEY] = {}
     app.cleanup_ctx.append(_client_session_context)
     app.router.add_route("*", "/{tail:.*}", _dispatch)
     return app
@@ -193,7 +196,12 @@ async def _dispatch(request: web.Request) -> web.StreamResponse:
             raise GatewayError(503, "worker_not_ready") from exc
         return web.json_response(payload)
     if request.path == "/ws":
+        local_job_id = request.query.get("job_id")
+        if local_job_id and local_job_id in request.app[JOB_MAPPINGS_KEY]:
+            return await _proxy_worker_websocket(request, local_job_id)
         return await _proxy_websocket(request)
+    if request.path == "/prompt":
+        return await _handle_prompt(request)
     return await _proxy_http(request)
 
 
@@ -206,8 +214,73 @@ def _is_allowed_path(path: str) -> bool:
     return False
 
 
-async def _proxy_http(request: web.Request) -> web.StreamResponse:
+async def _handle_prompt(request: web.Request) -> web.StreamResponse:
     body = await _read_bounded_body(request, request.app[CONFIG_KEY].max_upload_bytes)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        payload = None
+
+    if not _is_logical_submission(payload):
+        return await _proxy_http(request, body=body)
+
+    try:
+        workflow = build_h3_prompt(
+            payload["template_id"],
+            payload["prompt"],
+            payload.get("negative_prompt", ""),
+            payload["parameters"],
+            payload.get("assets", []),
+            gpu_memory_mib=_runtime_memory_mib(request.app[CONFIG_KEY].runtime_config_path),
+        )
+    except (KeyError, TypeError, WorkflowBuildError) as exc:
+        raise GatewayError(400, "invalid_submission") from exc
+
+    native_body = json.dumps({"prompt": workflow}, separators=(",", ":")).encode("utf-8")
+    response = await _post_native_prompt(request, native_body)
+    if response.status >= 400:
+        return response
+    try:
+        response_payload = json.loads(response.body.decode("utf-8"))
+    except (AttributeError, UnicodeDecodeError, ValueError) as exc:
+        raise GatewayError(502, "invalid_upstream_response") from exc
+    remote_job_id = response_payload.get("prompt_id") if isinstance(response_payload, dict) else None
+    node_errors = response_payload.get("node_errors") if isinstance(response_payload, dict) else None
+    if not isinstance(remote_job_id, str) or not remote_job_id:
+        if node_errors:
+            raise GatewayError(422, "workflow_rejected")
+        raise GatewayError(502, "invalid_upstream_response")
+    local_job_id = payload["job_id"]
+    request.app[JOB_MAPPINGS_KEY][local_job_id] = remote_job_id
+    return web.json_response({"remote_job_id": remote_job_id, "prompt_id": remote_job_id})
+
+
+def _is_logical_submission(payload: object) -> bool:
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("job_id"), str)
+        and isinstance(payload.get("template_id"), str)
+        and isinstance(payload.get("prompt"), str)
+        and isinstance(payload.get("parameters"), dict)
+        and isinstance(payload.get("assets", []), list)
+    )
+
+
+def _runtime_memory_mib(path: Path) -> int | None:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        gpu = payload.get("gpu") if isinstance(payload, dict) else None
+        value = gpu.get("total_memory_mib") if isinstance(gpu, dict) else None
+        return value if isinstance(value, int) and value > 0 else None
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+async def _proxy_http(
+    request: web.Request, *, body: bytes | None = None
+) -> web.StreamResponse:
+    if body is None:
+        body = await _read_bounded_body(request, request.app[CONFIG_KEY].max_upload_bytes)
     upstream_url = _build_upstream_url(request)
     headers = _selected_headers(request.headers, SAFE_REQUEST_HEADERS)
     session: ClientSession = request.app[SESSION_KEY]
@@ -239,6 +312,28 @@ async def _proxy_http(request: web.Request) -> web.StreamResponse:
                 await response.write(chunk)
             await response.write_eof()
             return response
+    except (ClientError, asyncio.TimeoutError) as exc:
+        raise GatewayError(502, "upstream_unavailable") from exc
+
+
+async def _post_native_prompt(request: web.Request, body: bytes) -> web.Response:
+    session: ClientSession = request.app[SESSION_KEY]
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    try:
+        async with session.post(
+            _build_upstream_url(request),
+            headers=headers,
+            data=body,
+            allow_redirects=False,
+        ) as upstream_response:
+            response_body = await upstream_response.read()
+            if upstream_response.status >= 400:
+                return _error_response("upstream_error", upstream_response.status, request["request_id"])
+            return web.Response(
+                status=upstream_response.status,
+                body=response_body,
+                headers=_selected_headers(upstream_response.headers, SAFE_RESPONSE_HEADERS),
+            )
     except (ClientError, asyncio.TimeoutError) as exc:
         raise GatewayError(502, "upstream_unavailable") from exc
 
@@ -288,6 +383,142 @@ async def _proxy_websocket(request: web.Request) -> web.WebSocketResponse:
     return downstream
 
 
+async def _proxy_worker_websocket(
+    request: web.Request, local_job_id: str
+) -> web.WebSocketResponse:
+    remote_job_id = request.app[JOB_MAPPINGS_KEY][local_job_id]
+    query = dict(request.query)
+    query.pop("job_id", None)
+    query["clientId"] = uuid.uuid4().hex
+    upstream_url = _build_upstream_url(request, query=query)
+    headers = _selected_headers(request.headers, SAFE_REQUEST_HEADERS)
+    session: ClientSession = request.app[SESSION_KEY]
+    try:
+        upstream = await session.ws_connect(
+            upstream_url, headers=headers, autoping=False, autoclose=False
+        )
+    except (ClientError, asyncio.TimeoutError) as exc:
+        raise GatewayError(502, "upstream_unavailable") from exc
+
+    downstream = web.WebSocketResponse(autoping=False, autoclose=False)
+    try:
+        await downstream.prepare(request)
+    except BaseException:
+        await upstream.close()
+        raise
+
+    downstream_task = asyncio.create_task(_forward_websocket(downstream, upstream))
+    event_task = asyncio.create_task(
+        _forward_worker_events(upstream, downstream, local_job_id, remote_job_id)
+    )
+    tasks = {downstream_task, event_task}
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+    finally:
+        if not downstream.closed:
+            await downstream.close()
+        if not upstream.closed:
+            await upstream.close()
+    return downstream
+
+
+async def _forward_worker_events(
+    upstream, downstream, local_job_id: str, remote_job_id: str
+) -> None:
+    sequence = 0
+    try:
+        async for message in upstream:
+            if message.type == WSMsgType.TEXT:
+                try:
+                    native = json.loads(message.data)
+                except (TypeError, ValueError):
+                    continue
+                event = _worker_event_from_message(
+                    local_job_id, remote_job_id, native, sequence
+                )
+                if event is not None:
+                    await downstream.send_json(event)
+                    sequence += 1
+            elif message.type == WSMsgType.PING:
+                await downstream.ping(message.data)
+            elif message.type == WSMsgType.PONG:
+                await downstream.pong(message.data)
+            elif message.type in {WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR, WSMsgType.CLOSING}:
+                await downstream.close()
+                return
+    except asyncio.CancelledError:
+        raise
+    except (ClientError, ConnectionResetError, RuntimeError):
+        await downstream.close()
+
+
+def _worker_event_from_message(
+    local_job_id: str, remote_job_id: str, native: object, sequence: int
+) -> dict[str, object] | None:
+    if not isinstance(native, dict) or not isinstance(native.get("type"), str):
+        return None
+    message_type = native["type"]
+    data = native.get("data") if isinstance(native.get("data"), dict) else {}
+    native_prompt_id = data.get("prompt_id")
+    if isinstance(native_prompt_id, str) and native_prompt_id != remote_job_id:
+        return None
+
+    state = None
+    progress = None
+    stage = None
+    message = None
+    if message_type == "status":
+        state = "queued"
+        message = "ComfyUI 已接受任务"
+    elif message_type == "execution_start":
+        state = "running"
+        progress = 0.0
+        message = "开始执行工作流"
+    elif message_type == "progress":
+        state = "running"
+        value = data.get("value")
+        maximum = data.get("max")
+        if isinstance(value, (int, float)) and isinstance(maximum, (int, float)) and maximum > 0:
+            progress = max(0.0, min(1.0, float(value) / float(maximum)))
+        message = "正在采样"
+    elif message_type == "executing":
+        node = data.get("node")
+        if node is None:
+            return None
+        state = "running"
+        stage = str(node)
+        message = f"执行节点 {node}"
+    elif message_type == "execution_cached":
+        state = "running"
+        message = "复用缓存节点"
+    elif message_type == "execution_success":
+        state = "completed"
+        progress = 1.0
+        message = "视频生成完成"
+    elif message_type in {"execution_error", "execution_interrupted"}:
+        state = "canceled" if message_type == "execution_interrupted" else "failed"
+        message = "任务已中断" if state == "canceled" else "ComfyUI 执行失败"
+    else:
+        return None
+
+    return {
+        "job_id": local_job_id,
+        "remote_job_id": remote_job_id,
+        "sequence": sequence,
+        "state": state,
+        "progress": progress,
+        "stage": stage,
+        "message": message,
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
 async def _forward_websocket(source, target) -> None:
     try:
         async for message in source:
@@ -327,11 +558,11 @@ async def _read_bounded_body(request: web.Request, limit: int) -> bytes:
         chunks.append(chunk)
 
 
-def _build_upstream_url(request: web.Request) -> URL:
+def _build_upstream_url(request: web.Request, *, query=None) -> URL:
     upstream = request.app[CONFIG_KEY].upstream_url
     base_path = upstream.path.rstrip("/")
     path = f"{base_path}{request.path}" or "/"
-    return upstream.with_path(path).with_query(request.query)
+    return upstream.with_path(path).with_query(request.query if query is None else query)
 
 
 def _selected_headers(headers: Iterable, allowed: frozenset) -> dict:

@@ -210,7 +210,12 @@ run_bootstrap() {
   write_bootstrap_status "installing_h3" 0.2 "正在执行 H3 Fast 初始化"
   local fast_script
   fast_script="$(download_fast_script)"
-  if H3_USE_VAST_COMFY_BASE=1 H3_BOOTSTRAP_STATUS_FILE="$H3_BOOTSTRAP_STATUS_FILE" bash "$fast_script"; then
+  if H3_USE_VAST_COMFY_BASE=1 \
+    H3_BOOTSTRAP_STATUS_FILE="$H3_BOOTSTRAP_STATUS_FILE" \
+    H3_COMFY_DIR="$H3_COMFY_DIR" \
+    H3_COMFY_PYTHON="$H3_COMFY_PYTHON" \
+    H3_COMFY_PORT="$H3_COMFY_PORT" \
+    bash "$fast_script"; then
     :
   else
     local fast_exit_code=$?

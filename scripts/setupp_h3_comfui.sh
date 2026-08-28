@@ -376,6 +376,8 @@ detect_comfy_port() {
 
 detect_environment() {
   H3_STAGE="environment discovery"
+  local configured_python="${H3_COMFY_PYTHON:-}"
+  local process_python=""
   if [[ -z "$SERVICE_NAME" ]]; then
     SERVICE_NAME="$(find_service_name 2>/dev/null || true)"
   fi
@@ -383,7 +385,7 @@ detect_environment() {
 
   COMFY_PID="$(find_comfy_process "$SERVICE_NAME" 2>/dev/null || true)"
   if [[ -n "$COMFY_PID" && -r "/proc/$COMFY_PID/exe" ]]; then
-    COMFY_PYTHON="$(readlink -f "/proc/$COMFY_PID/exe")"
+    process_python="$(readlink -f "/proc/$COMFY_PID/exe")"
     if [[ -z "$COMFY_DIR" ]]; then
       COMFY_DIR="$(readlink -f "/proc/$COMFY_PID/cwd")"
     fi
@@ -440,6 +442,13 @@ detect_environment() {
     COMFY_DIR="$(find_comfy_directory 2>/dev/null || true)"
   fi
   [[ -n "$COMFY_DIR" && -f "$COMFY_DIR/main.py" ]] || die "Could not auto-detect ComfyUI/main.py under /workspace, /opt, /root, /home, /mnt, or /app. Set H3_COMFY_DIR only if the template uses a custom path."
+  if [[ -n "$configured_python" ]]; then
+    COMFY_PYTHON="$configured_python"
+  elif use_vast_comfy_base && [[ -x "/venv/main/bin/python3" ]]; then
+    COMFY_PYTHON="/venv/main/bin/python3"
+  elif [[ -n "$process_python" && -z "$COMFY_PYTHON" ]]; then
+    COMFY_PYTHON="$process_python"
+  fi
   if [[ -z "$COMFY_PYTHON" || ! -x "$COMFY_PYTHON" ]] \
     || ! is_python_executable "$COMFY_PYTHON"; then
     COMFY_PYTHON="$(find_comfy_python 2>/dev/null || true)"
