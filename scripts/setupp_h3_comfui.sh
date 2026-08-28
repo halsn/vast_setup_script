@@ -1007,6 +1007,16 @@ patch_comfy_command_file() {
 import re, sys
 path, vram, use_sage = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1"
 lines = open(path, encoding='utf-8').read().splitlines(keepends=True)
+portal_guard = re.compile(r'^\s*(?:\.|source)\s+.*exit_portal\.sh.*ComfyUI.*$')
+for index, raw in enumerate(lines):
+    if portal_guard.match(raw.rstrip('\n')):
+        newline = '\n' if raw.endswith('\n') else ''
+        indent = raw[:len(raw) - len(raw.lstrip())]
+        lines[index] = (
+            indent
+            + '# H3 Worker keeps ComfyUI under Supervisor; Vast Portal registration is optional.'
+            + newline
+        )
 for i, raw in enumerate(lines):
     if not re.search(r'(?i)python\S*\s+.*main\.py', raw):
         continue
