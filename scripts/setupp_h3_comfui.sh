@@ -10,6 +10,7 @@ H3_USE_SAGE_GLOBAL="${H3_USE_SAGE_GLOBAL:-1}"
 H3_WORKFLOW_REQUIRED="${H3_WORKFLOW_REQUIRED:-1}"
 H3_USE_VAST_COMFY_BASE="${H3_USE_VAST_COMFY_BASE:-auto}"
 H3_CACHED_MODEL_MIN_FREE_GB="${H3_CACHED_MODEL_MIN_FREE_GB:-20}"
+H3_COMFY_START_TIMEOUT_SECONDS="${H3_COMFY_START_TIMEOUT_SECONDS:-600}"
 SERVICE_NAME="${H3_SERVICE_NAME:-}"
 COMFY_DIR="${H3_COMFY_DIR:-}"
 COMFY_PYTHON=""
@@ -1224,7 +1225,7 @@ restart_comfyui() {
     print_recent_logs
     die "Supervisor could not $action ComfyUI. Inspect the command and wrapper above."
   fi
-  if ! wait_for_service 120; then
+  if ! wait_for_service "$H3_COMFY_START_TIMEOUT_SECONDS"; then
     print_recent_logs
     die "ComfyUI did not reach RUNNING state within 120 seconds."
   fi
