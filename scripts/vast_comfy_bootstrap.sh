@@ -9,7 +9,7 @@ H3_VAST_BOOTSTRAP_LIB_ONLY="${H3_VAST_BOOTSTRAP_LIB_ONLY:-0}"
 H3_BOOTSTRAP_STATUS_FILE="${H3_BOOTSTRAP_STATUS_FILE:-/run/h3/bootstrap.json}"
 H3_BOOTSTRAP_LOG_FILE="${H3_BOOTSTRAP_LOG_FILE:-/var/log/h3/bootstrap.log}"
 H3_BOOTSTRAP_TIMEOUT_SECONDS="${H3_BOOTSTRAP_TIMEOUT_SECONDS:-300}"
-H3_COMFY_DIR="${H3_COMFY_DIR:-/workspace/ComfyUI}"
+H3_COMFY_DIR="${H3_COMFY_DIR:-/opt/workspace-internal/ComfyUI}"
 H3_COMFY_PYTHON="${H3_COMFY_PYTHON:-/venv/main/bin/python3}"
 H3_COMFY_SERVICE="${H3_COMFY_SERVICE:-comfyui}"
 H3_BUNDLE_ROOT="${H3_BUNDLE_ROOT:-}"
@@ -17,7 +17,7 @@ H3_FAST_URL="${H3_FAST_URL:-https://raw.githubusercontent.com/halsn/vast_setup_s
 H3_RUNTIME_REPOSITORY="${H3_RUNTIME_REPOSITORY:-https://github.com/halsn/vast_setup_script.git}"
 H3_RUNTIME_ROOT="${H3_RUNTIME_ROOT:-/opt/h3-worker}"
 H3_GATEWAY_PORT="${H3_GATEWAY_PORT:-8190}"
-H3_COMFY_PORT="${H3_COMFY_PORT:-8188}"
+H3_COMFY_PORT="${H3_COMFY_PORT:-18188}"
 H3_STATUS_PYTHON="${H3_STATUS_PYTHON:-python3}"
 H3_GATEWAY_PID=""
 H3_BOOTSTRAP_SUCCEEDED=0
@@ -63,6 +63,7 @@ write_bootstrap_status() {
 wait_for_vast_comfy_base() {
   local deadline=$((SECONDS + H3_BOOTSTRAP_TIMEOUT_SECONDS))
   while true; do
+    resolve_vast_comfy_base
     if command -v supervisorctl >/dev/null 2>&1 \
       && [[ -f "$H3_COMFY_DIR/main.py" ]] \
       && [[ -x "$H3_COMFY_PYTHON" ]] \
@@ -75,6 +76,51 @@ wait_for_vast_comfy_base() {
     write_bootstrap_status "waiting_for_base" 0.05 "等待 Vast ComfyUI 基础环境"
     sleep 2
   done
+}
+
+resolve_vast_comfy_base() {
+  local candidate
+  local candidates=(
+    "$H3_COMFY_DIR"
+    "/opt/workspace-internal/ComfyUI"
+    "/workspace/ComfyUI"
+    "/workspace/comfyui"
+    "/opt/ComfyUI"
+    "/opt/comfyui"
+    "/root/ComfyUI"
+    "/root/comfyui"
+    "/app/ComfyUI"
+    "/app/comfyui"
+  )
+
+  if [[ ! -f "$H3_COMFY_DIR/main.py" ]]; then
+    for candidate in "${candidates[@]}"; do
+      if [[ -f "$candidate/main.py" ]]; then
+        H3_COMFY_DIR="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [[ ! -x "$H3_COMFY_PYTHON" ]]; then
+    for candidate in \
+      "/venv/main/bin/python3" \
+      "/opt/miniforge3/bin/python3" \
+      "/usr/local/bin/python3" \
+      "/usr/bin/python3"; do
+      if [[ -x "$candidate" ]]; then
+        H3_COMFY_PYTHON="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [[ -n "${COMFYUI_ARGS:-}" ]]; then
+    candidate="$(sed -nE 's/.*--port[= ]+([0-9]+).*/\1/p' <<<"$COMFYUI_ARGS" | head -n 1)"
+    if [[ "$candidate" =~ ^[0-9]+$ ]]; then
+      H3_COMFY_PORT="$candidate"
+    fi
+  fi
 }
 
 download_fast_script() {
