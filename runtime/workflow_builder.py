@@ -158,15 +158,15 @@ def _base_graph(
         images=_connection("decode_video"),
         fps=24.0,
         audio=_connection("decode_audio"),
-        bit_depth="auto",
+        bit_depth=8,
         color_space="sRGB",
     )
     workflow["save_video"] = _node(
         "SaveVideo",
         video=_connection("create_video"),
         filename_prefix="video/H3",
-        format={"format": "mp4"},
-        codec={"codec": "auto"},
+        format="auto",
+        **{"format.codec": "auto"},
     )
     return workflow
 
