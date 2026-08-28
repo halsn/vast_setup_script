@@ -1014,7 +1014,7 @@ for index, raw in enumerate(lines):
         indent = raw[:len(raw) - len(raw.lstrip())]
         lines[index] = (
             indent
-            + '# H3 Worker keeps ComfyUI under Supervisor; Vast Portal registration is optional.'
+            + ': # H3 Worker keeps ComfyUI under Supervisor; Vast Portal registration is optional.'
             + newline
         )
 for i, raw in enumerate(lines):
