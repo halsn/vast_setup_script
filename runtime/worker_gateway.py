@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 from datetime import datetime, timezone
+import hashlib
 import hmac
 import json
 import os
@@ -21,6 +22,7 @@ ALLOWED_PATHS = frozenset(
     {
         "/healthz",
         "/bootstrap/status",
+        "/bootstrap/log",
         "/ready",
         "/prompt",
         "/history",
@@ -33,6 +35,9 @@ ALLOWED_PATHS = frozenset(
     }
 )
 DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+DEFAULT_BOOTSTRAP_LOG_LINES = 200
+MAX_BOOTSTRAP_LOG_LINES = 500
+MAX_BOOTSTRAP_LOG_BYTES = 512 * 1024
 SAFE_REQUEST_HEADERS = frozenset(
     {
         "accept",
@@ -71,6 +76,7 @@ class GatewayConfig:
     template_catalog_path: Path = Path("/opt/h3/config/templates.json")
     comfyui_dir: Path = Path("/opt/ComfyUI")
     bootstrap_status_path: Path = Path("/run/h3/bootstrap.json")
+    bootstrap_log_path: Path = Path("/var/log/h3/bootstrap.log")
 
 
 CONFIG_KEY = web.AppKey("gateway_config", GatewayConfig)
@@ -128,6 +134,7 @@ def create_app(
     template_catalog_path: Optional[str] = None,
     comfyui_dir: Optional[str] = None,
     bootstrap_status_path: Optional[str] = None,
+    bootstrap_log_path: Optional[str] = None,
 ) -> web.Application:
     if not token or not token.strip():
         raise ValueError("H3_WORKER_TOKEN must not be empty")
@@ -142,6 +149,7 @@ def create_app(
         template_catalog_path=Path(template_catalog_path or os.getenv("H3_TEMPLATE_CATALOG", "/opt/h3/config/templates.json")),
         comfyui_dir=Path(comfyui_dir or os.getenv("COMFYUI_DIR", "/opt/ComfyUI")),
         bootstrap_status_path=Path(bootstrap_status_path or os.getenv("H3_BOOTSTRAP_STATUS_FILE", "/run/h3/bootstrap.json")),
+        bootstrap_log_path=Path(bootstrap_log_path or os.getenv("H3_BOOTSTRAP_LOG_FILE", "/var/log/h3/bootstrap.log")),
     )
     app = web.Application(middlewares=[_gateway_middleware], client_max_size=None)
     app[CONFIG_KEY] = config
@@ -185,6 +193,9 @@ async def _dispatch(request: web.Request) -> web.StreamResponse:
         )
     if request.path == "/bootstrap/status":
         return web.json_response(_load_bootstrap_status(request.app[CONFIG_KEY].bootstrap_status_path))
+    if request.path == "/bootstrap/log":
+        offset, limit, generation = _bootstrap_log_cursor(request)
+        return web.json_response(_load_bootstrap_log(request.app[CONFIG_KEY].bootstrap_log_path, offset, limit, generation))
     if request.path == "/ready":
         try:
             payload = build_ready_payload(
@@ -628,6 +639,72 @@ def _load_bootstrap_status(path: Path) -> dict:
         }
 
 
+def _bootstrap_log_cursor(request: web.Request) -> tuple[int, int, str]:
+    try:
+        offset = int(request.query.get("offset", "0"))
+        limit = int(request.query.get("limit", str(DEFAULT_BOOTSTRAP_LOG_LINES)))
+    except (TypeError, ValueError) as exc:
+        raise GatewayError(400, "invalid_bootstrap_log_cursor") from exc
+    generation = request.query.get("generation", "")
+    if offset < 0 or not 1 <= limit <= MAX_BOOTSTRAP_LOG_LINES or len(generation) > 256:
+        raise GatewayError(400, "invalid_bootstrap_log_cursor")
+    return offset, limit, generation
+
+
+def _bootstrap_log_generation(stream, offset: int) -> str:
+    stat = os.fstat(stream.fileno())
+    current_position = stream.tell()
+    stream.seek(0)
+    digest = hashlib.sha256(stream.read(offset)).hexdigest()
+    stream.seek(current_position)
+    return f"{stat.st_dev}:{stat.st_ino}:{digest}"
+
+
+def _load_bootstrap_log(path: Path, offset: int, limit: int, generation: str) -> dict:
+    try:
+        with path.open("rb") as stream:
+            size = os.fstat(stream.fileno()).st_size
+            reset = offset > size or (bool(generation) and generation != _bootstrap_log_generation(stream, offset))
+            if reset:
+                offset = 0
+            stream.seek(offset)
+            payload = stream.read(MAX_BOOTSTRAP_LOG_BYTES)
+            has_more_bytes = stream.tell() < os.fstat(stream.fileno()).st_size
+            if not payload:
+                next_offset = offset
+                return {
+                    "lines": [],
+                    "next_offset": next_offset,
+                    "generation": _bootstrap_log_generation(stream, next_offset),
+                    "truncated": False,
+                    "reset": reset,
+                }
+
+            last_newline = payload.rfind(b"\n")
+            if last_newline < 0:
+                return {
+                    "lines": [],
+                    "next_offset": offset,
+                    "generation": _bootstrap_log_generation(stream, offset),
+                    "truncated": False,
+                    "reset": reset,
+                }
+
+            complete = payload[: last_newline + 1]
+            raw_lines = complete.splitlines(keepends=True)
+            selected = raw_lines[:limit]
+            next_offset = offset + sum(len(line) for line in selected)
+            return {
+                "lines": [line.decode("utf-8", errors="replace").rstrip("\r\n") for line in selected],
+                "next_offset": next_offset,
+                "generation": _bootstrap_log_generation(stream, next_offset),
+                "truncated": len(raw_lines) > limit or has_more_bytes,
+                "reset": reset,
+            }
+    except OSError:
+        return {"lines": [], "next_offset": offset, "generation": "", "truncated": False, "reset": False}
+
+
 def _error_text(error: str, status: int, request_id: str) -> str:
     return json.dumps(
         {"error": error, "request_id": request_id, "status": status},
@@ -700,6 +777,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--bootstrap-status",
         default=os.getenv("H3_BOOTSTRAP_STATUS_FILE", "/run/h3/bootstrap.json"),
     )
+    parser.add_argument(
+        "--bootstrap-log",
+        default=os.getenv("H3_BOOTSTRAP_LOG_FILE", "/var/log/h3/bootstrap.log"),
+    )
     return parser
 
 
@@ -718,6 +799,7 @@ def main(argv=None) -> int:
             template_catalog_path=args.template_catalog,
             comfyui_dir=args.comfyui_dir,
             bootstrap_status_path=args.bootstrap_status,
+            bootstrap_log_path=args.bootstrap_log,
         )
     except ValueError as exc:
         parser.error(str(exc))

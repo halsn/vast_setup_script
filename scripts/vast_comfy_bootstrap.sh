@@ -175,6 +175,7 @@ start_worker_gateway() {
     MODEL_CACHE_DIR="$H3_COMFY_DIR/models" \
     H3_RUNTIME_CONFIG="$runtime_config" \
     H3_BOOTSTRAP_STATUS_FILE="$H3_BOOTSTRAP_STATUS_FILE" \
+    H3_BOOTSTRAP_LOG_FILE="$H3_BOOTSTRAP_LOG_FILE" \
     COMFYUI_DIR="$H3_COMFY_DIR" \
     nohup "$H3_COMFY_PYTHON" -m runtime.worker_gateway \
       --listen 0.0.0.0 \
