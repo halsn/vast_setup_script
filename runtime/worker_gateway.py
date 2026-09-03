@@ -206,6 +206,11 @@ async def _dispatch(request: web.Request) -> web.StreamResponse:
         except ReadinessError as exc:
             raise GatewayError(503, "worker_not_ready") from exc
         return web.json_response(payload)
+    if request.path.startswith("/history/"):
+        local_job_id = request.path.removeprefix("/history/")
+        remote_job_id = request.app[JOB_MAPPINGS_KEY].get(local_job_id)
+        if remote_job_id:
+            return await _proxy_http(request, path=f"/history/{remote_job_id}")
     if request.path == "/ws":
         local_job_id = request.query.get("job_id")
         if local_job_id and local_job_id in request.app[JOB_MAPPINGS_KEY]:
@@ -288,11 +293,12 @@ def _runtime_memory_mib(path: Path) -> int | None:
 
 
 async def _proxy_http(
-    request: web.Request, *, body: bytes | None = None
+    request: web.Request, *, body: bytes | None = None, path: str | None = None
 ) -> web.StreamResponse:
     if body is None:
         body = await _read_bounded_body(request, request.app[CONFIG_KEY].max_upload_bytes)
-    upstream_url = _build_upstream_url(request)
+    body = _rewrite_interrupt_body(request, body)
+    upstream_url = _build_upstream_url(request, path=path)
     headers = _selected_headers(request.headers, SAFE_REQUEST_HEADERS)
     session: ClientSession = request.app[SESSION_KEY]
 
@@ -569,11 +575,31 @@ async def _read_bounded_body(request: web.Request, limit: int) -> bytes:
         chunks.append(chunk)
 
 
-def _build_upstream_url(request: web.Request, *, query=None) -> URL:
+def _rewrite_interrupt_body(request: web.Request, body: bytes) -> bytes:
+    if request.path != "/interrupt":
+        return body
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return body
+    if not isinstance(payload, dict):
+        return body
+    local_job_id = payload.get("prompt")
+    if not isinstance(local_job_id, str):
+        return body
+    remote_job_id = request.app[JOB_MAPPINGS_KEY].get(local_job_id)
+    if not remote_job_id:
+        return body
+    payload["prompt"] = remote_job_id
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def _build_upstream_url(request: web.Request, *, path: str | None = None, query=None) -> URL:
     upstream = request.app[CONFIG_KEY].upstream_url
     base_path = upstream.path.rstrip("/")
-    path = f"{base_path}{request.path}" or "/"
-    return upstream.with_path(path).with_query(request.query if query is None else query)
+    request_path = path or request.path
+    upstream_path = f"{base_path}{request_path}" or "/"
+    return upstream.with_path(upstream_path).with_query(request.query if query is None else query)
 
 
 def _selected_headers(headers: Iterable, allowed: frozenset) -> dict:
