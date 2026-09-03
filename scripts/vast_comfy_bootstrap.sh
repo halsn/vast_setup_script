@@ -80,6 +80,13 @@ wait_for_vast_comfy_base() {
   done
 }
 
+require_worker_token() {
+  if [[ -z "${H3_WORKER_TOKEN:-}" ]]; then
+    write_bootstrap_status "bootstrap_failed" 0 "缺少 H3 Worker Token" "H3_WORKER_TOKEN 未设置"
+    return 1
+  fi
+}
+
 resolve_vast_comfy_base() {
   local candidate process_pid process_dir
 
@@ -171,7 +178,8 @@ install_worker_runtime() {
 
 start_worker_gateway() {
   local runtime_config="${H3_RUNTIME_CONFIG:-/run/h3/runtime.json}"
-  PYTHONPATH="$H3_RUNTIME_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+  H3_WORKER_TOKEN="$H3_WORKER_TOKEN" \
+    PYTHONPATH="$H3_RUNTIME_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
     MODEL_CACHE_DIR="$H3_COMFY_DIR/models" \
     H3_RUNTIME_CONFIG="$runtime_config" \
     H3_BOOTSTRAP_STATUS_FILE="$H3_BOOTSTRAP_STATUS_FILE" \
@@ -189,6 +197,26 @@ start_worker_gateway() {
   H3_GATEWAY_PID=$!
 }
 
+wait_for_gateway_health() {
+  local deadline=$((SECONDS + H3_BOOTSTRAP_TIMEOUT_SECONDS))
+  while true; do
+    if [[ -n "$H3_GATEWAY_PID" ]] && ! kill -0 "$H3_GATEWAY_PID" 2>/dev/null; then
+      write_bootstrap_status "bootstrap_failed" 0 "H3 Gateway 已退出" "Gateway 进程提前退出"
+      return 1
+    fi
+    if curl -fsS --max-time 3 \
+      -H "Authorization: Bearer $H3_WORKER_TOKEN" \
+      "http://127.0.0.1:$H3_GATEWAY_PORT/healthz" >/dev/null; then
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      return 1
+    fi
+    write_bootstrap_status "health_check" 0.88 "等待 H3 Gateway 健康检查"
+    sleep 2
+  done
+}
+
 wait_for_comfyui() {
   local deadline=$((SECONDS + H3_BOOTSTRAP_TIMEOUT_SECONDS))
   while ! curl -fsS --max-time 3 "http://127.0.0.1:$H3_COMFY_PORT/" >/dev/null 2>&1; do
@@ -196,6 +224,38 @@ wait_for_comfyui() {
       return 1
     fi
     write_bootstrap_status "health_check" 0.92 "等待 ComfyUI 健康检查"
+    sleep 2
+  done
+}
+
+wait_for_worker_ready() {
+  local deadline=$((SECONDS + H3_BOOTSTRAP_TIMEOUT_SECONDS))
+  while true; do
+    local body
+    body="$(curl -fsS --max-time 5 \
+      -H "Authorization: Bearer $H3_WORKER_TOKEN" \
+      "http://127.0.0.1:$H3_GATEWAY_PORT/ready" 2>/dev/null || true)"
+    if H3_READY_BODY="$body" "$H3_STATUS_PYTHON" - <<'PY'
+import json
+import os
+
+try:
+    payload = json.loads(os.environ["H3_READY_BODY"])
+except (KeyError, TypeError, ValueError):
+    raise SystemExit(1)
+raise SystemExit(
+    0
+    if payload.get("status") == "ready" and isinstance(payload.get("templates"), list)
+    else 1
+)
+PY
+    then
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      return 1
+    fi
+    write_bootstrap_status "health_check" 0.96 "等待 H3 Worker readiness"
     sleep 2
   done
 }
@@ -220,10 +280,14 @@ run_bootstrap() {
   H3_BOOTSTRAP_STAGE="waiting_for_base"
   write_bootstrap_status "starting" 0 "正在初始化 Vast ComfyUI"
   wait_for_vast_comfy_base || { write_bootstrap_status "bootstrap_failed" 0 "Vast 基础环境未就绪" "等待基础环境超时"; return 1; }
+  H3_BOOTSTRAP_STAGE="checking_worker_token"
+  require_worker_token
   H3_BOOTSTRAP_STAGE="installing_worker_runtime"
   install_worker_runtime
   H3_BOOTSTRAP_STAGE="fast_bootstrap"
   start_worker_gateway
+  H3_BOOTSTRAP_STAGE="gateway_health"
+  wait_for_gateway_health
   write_bootstrap_status "installing_h3" 0.2 "正在执行 H3 Fast 初始化"
   local fast_script
   fast_script="$(download_fast_script)"
@@ -253,6 +317,8 @@ run_bootstrap() {
   H3_BOOTSTRAP_STAGE="health_check"
   write_bootstrap_status "starting_comfyui" 0.9 "正在确认 ComfyUI 已启动"
   wait_for_comfyui
+  H3_BOOTSTRAP_STAGE="worker_readiness"
+  wait_for_worker_ready
   write_bootstrap_status "ready" 1 "H3 Worker 已就绪"
   H3_BOOTSTRAP_SUCCEEDED=1
 }
