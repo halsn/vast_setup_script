@@ -9,6 +9,7 @@ H3_VAST_BOOTSTRAP_LIB_ONLY="${H3_VAST_BOOTSTRAP_LIB_ONLY:-0}"
 H3_BOOTSTRAP_STATUS_FILE="${H3_BOOTSTRAP_STATUS_FILE:-/run/h3/bootstrap.json}"
 H3_BOOTSTRAP_LOG_FILE="${H3_BOOTSTRAP_LOG_FILE:-/var/log/h3/bootstrap.log}"
 H3_BOOTSTRAP_TRACE_FILE="${H3_BOOTSTRAP_TRACE_FILE:-/run/h3/bootstrap.log}"
+H3_BOOTSTRAP_PID_FILE="${H3_BOOTSTRAP_PID_FILE:-/run/h3/bootstrap.pid}"
 H3_BOOTSTRAP_TIMEOUT_SECONDS="${H3_BOOTSTRAP_TIMEOUT_SECONDS:-300}"
 H3_COMFY_DIR="${H3_COMFY_DIR:-}"
 H3_COMFY_PYTHON="${H3_COMFY_PYTHON:-/venv/main/bin/python3}"
@@ -289,11 +290,19 @@ on_exit() {
   if (( code != 0 && H3_BOOTSTRAP_SUCCEEDED == 0 )); then
     write_bootstrap_status "bootstrap_failed" 0 "H3 部署失败" "阶段=${H3_BOOTSTRAP_STAGE}; exit_code=${code}" || true
   fi
+  local recorded_pid=""
+  if [[ -f "$H3_BOOTSTRAP_PID_FILE" ]]; then
+    recorded_pid="$(cat "$H3_BOOTSTRAP_PID_FILE" 2>/dev/null || true)"
+  fi
+  if [[ "$recorded_pid" == "$$" ]]; then
+    rm -f "$H3_BOOTSTRAP_PID_FILE"
+  fi
   cleanup
 }
 
 run_bootstrap() {
   mkdir -p "$(dirname "$H3_BOOTSTRAP_LOG_FILE")" "$(dirname "$H3_BOOTSTRAP_TRACE_FILE")" /run/h3
+  printf '%s\n' "$$" >"$H3_BOOTSTRAP_PID_FILE"
   exec > >(tee -a "$H3_BOOTSTRAP_LOG_FILE" "$H3_BOOTSTRAP_TRACE_FILE") 2>&1
   H3_BOOTSTRAP_STAGE="waiting_for_base"
   write_bootstrap_status "starting" 0 "正在初始化 Vast ComfyUI"

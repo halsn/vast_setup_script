@@ -50,6 +50,14 @@ class BootstrapContractTests(unittest.TestCase):
             self.text.index('nohup "$H3_COMFY_PYTHON" -m runtime.worker_gateway'),
         )
 
+    def test_bootstrap_pid_is_removed_after_process_exit(self):
+        self.assertIn(
+            'H3_BOOTSTRAP_PID_FILE="${H3_BOOTSTRAP_PID_FILE:-/run/h3/bootstrap.pid}"',
+            self.text,
+        )
+        self.assertIn('printf \'%s\\n\' "$$" >"$H3_BOOTSTRAP_PID_FILE"', self.text)
+        self.assertIn('rm -f "$H3_BOOTSTRAP_PID_FILE"', self.text)
+
 
 if __name__ == "__main__":
     unittest.main()
