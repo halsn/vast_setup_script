@@ -65,6 +65,10 @@ class BootstrapContractTests(unittest.TestCase):
         fast_bootstrap = self.text.index('H3_BOOTSTRAP_STAGE="fast_bootstrap"')
         self.assertLess(migration, fast_bootstrap)
 
+    def test_legacy_model_migration_has_a_local_logger(self):
+        self.assertIn("log_info() {", self.text)
+        self.assertIn("log_warn() {", self.text)
+
     def test_bootstrap_pid_is_removed_after_process_exit(self):
         self.assertIn(
             'H3_BOOTSTRAP_PID_FILE="${H3_BOOTSTRAP_PID_FILE:-/run/h3/bootstrap.pid}"',

@@ -26,6 +26,9 @@ H3_GATEWAY_PID=""
 H3_BOOTSTRAP_SUCCEEDED=0
 H3_BOOTSTRAP_STAGE="starting"
 
+log_info() { printf '[INFO] %s\n' "$*" >&2; }
+log_warn() { printf '[WARN] %s\n' "$*" >&2; }
+
 _write_bootstrap_status_unlocked() {
   local stage="$1" progress="$2" message="$3" error="${4:-}"
   mkdir -p "$(dirname "$H3_BOOTSTRAP_STATUS_FILE")"
