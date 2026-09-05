@@ -902,7 +902,7 @@ model_is_complete() {
   local path="$1" min_bytes="$2"
   [[ -f "$path" ]] || return 1
   local size
-  size="$(stat -c '%s' "$path" 2>/dev/null || printf 0)"
+  size="$(stat -Lc '%s' "$path" 2>/dev/null || printf 0)"
   (( size >= min_bytes ))
 }
 

@@ -3,12 +3,14 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "vast_comfy_bootstrap.sh"
+BASE_SCRIPT = Path(__file__).parents[1] / "scripts" / "setupp_h3_comfui.sh"
 
 
 class BootstrapContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.text = SCRIPT.read_text(encoding="utf-8")
+        cls.base_text = BASE_SCRIPT.read_text(encoding="utf-8")
 
     def test_token_guard_precedes_gateway_start(self):
         self.assertIn('if [[ -z "${H3_WORKER_TOKEN:-}" ]]; then', self.text)
@@ -68,6 +70,9 @@ class BootstrapContractTests(unittest.TestCase):
     def test_legacy_model_migration_has_a_local_logger(self):
         self.assertIn("log_info() {", self.text)
         self.assertIn("log_warn() {", self.text)
+
+    def test_model_size_validation_follows_legacy_cache_symlinks(self):
+        self.assertIn("stat -Lc '%s'", self.base_text)
 
     def test_bootstrap_pid_is_removed_after_process_exit(self):
         self.assertIn(
