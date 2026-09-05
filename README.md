@@ -4,7 +4,7 @@
 
 桌面端在 Vast 实例进入 ready 后，按以下顺序手动部署：
 
-1. `scripts/vast_comfy_bootstrap.sh` 等待 ComfyUI 基础环境就绪；
+1. `scripts/vast_comfy_bootstrap.sh` 启动并等待 ComfyUI 基础环境就绪；
 2. 执行 `scripts/setupp_h3_comfui_fast.sh` 安装 H3 节点、工作流和模型；
 3. 从本仓库安装 `runtime/`、`config/` 和 `requirements-runtime.txt`，启动 Worker Gateway。
 4. 只有 Gateway、ComfyUI 和 Worker `/ready` 全部通过后，才写入 ready 状态。
@@ -29,7 +29,7 @@ https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/vast_comf
 
 ## 手动 SSH 部署
 
-实例创建请求不需要 `onstart`。实例状态变为 ready 后，桌面端通过 SSH 上传并启动脚本；Worker Token 只写入远程权限为 `600` 的环境文件，不放入命令行、日志或状态文件。
+实例状态变为 ready 后，桌面端通过 SSH 上传并手动启动脚本；脚本会按需启动官方 ComfyUI 基础 entrypoint，但不会在实例创建时部署 H3。Worker Token 只写入远程权限为 `600` 的环境文件，不放入命令行、日志或状态文件。
 
 ```bash
 scp -P <ssh-port> scripts/vast_comfy_bootstrap.sh root@<ssh-host>:/run/h3/vast_comfy_bootstrap.sh

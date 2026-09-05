@@ -62,7 +62,19 @@ write_bootstrap_status() {
   _write_bootstrap_status_unlocked "$@"
 }
 
+start_vast_comfy_base() {
+  if command -v pgrep >/dev/null 2>&1 && pgrep -x supervisord >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -x "/opt/instance-tools/bin/entrypoint.sh" ]]; then
+    mkdir -p /var/log/h3
+    nohup bash /opt/instance-tools/bin/entrypoint.sh \
+      >>/var/log/h3/vast-comfy-base.log 2>&1 </dev/null &
+  fi
+}
+
 wait_for_vast_comfy_base() {
+  start_vast_comfy_base
   local deadline=$((SECONDS + H3_BOOTSTRAP_TIMEOUT_SECONDS))
   while true; do
     resolve_vast_comfy_base

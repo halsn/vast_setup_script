@@ -31,6 +31,14 @@ class BootstrapContractTests(unittest.TestCase):
             self.text.index('write_bootstrap_status "ready"'),
         )
 
+    def test_bootstrap_starts_official_base_when_it_is_not_running(self):
+        self.assertIn("start_vast_comfy_base", self.text)
+        self.assertIn("/opt/instance-tools/bin/entrypoint.sh", self.text)
+        self.assertLess(
+            self.text.index("start_vast_comfy_base()"),
+            self.text.index("wait_for_vast_comfy_base()"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
