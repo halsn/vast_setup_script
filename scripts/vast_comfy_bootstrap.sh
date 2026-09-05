@@ -84,6 +84,7 @@ wait_for_vast_comfy_base() {
       && [[ -f "$H3_COMFY_DIR/main.py" ]] \
       && [[ -x "$H3_COMFY_PYTHON" ]] \
       && supervisorctl status "$H3_COMFY_SERVICE" >/dev/null 2>&1; then
+      migrate_legacy_h3_models
       return 0
     fi
     if (( SECONDS >= deadline )); then
@@ -160,6 +161,34 @@ resolve_vast_comfy_base() {
       H3_COMFY_PORT="$candidate"
     fi
   fi
+}
+
+migrate_legacy_h3_models() {
+  local legacy_root="${H3_LEGACY_COMFY_DIR:-/opt/workspace-internal/ComfyUI}"
+  [[ -n "$H3_COMFY_DIR" && "$H3_COMFY_DIR" != "$legacy_root" ]] || return 0
+  [[ -d "$legacy_root/models" && -d "$H3_COMFY_DIR/models" ]] || return 0
+
+  local model_path source destination
+  local model_paths=(
+    "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+    "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+    "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    "vae/minimax_h3_video_vae_fp16.safetensors"
+    "vae/minimax_h3_audio_vae_fp32.safetensors"
+    "loras/minimax_h3_turbo_v4_step600_ema.safetensors"
+  )
+  for model_path in "${model_paths[@]}"; do
+    source="$legacy_root/models/$model_path"
+    destination="$H3_COMFY_DIR/models/$model_path"
+    if [[ -f "$source" && ! -e "$destination" ]]; then
+      mkdir -p "$(dirname "$destination")"
+      if ln -s "$source" "$destination"; then
+        log_info "Reusing legacy H3 model cache: $model_path"
+      else
+        log_warn "Could not link legacy H3 model cache: $model_path"
+      fi
+    fi
+  done
 }
 
 download_fast_script() {

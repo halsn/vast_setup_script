@@ -50,6 +50,21 @@ class BootstrapContractTests(unittest.TestCase):
             self.text.index('nohup "$H3_COMFY_PYTHON" -m runtime.worker_gateway'),
         )
 
+    def test_legacy_model_cache_is_reused_before_fast_bootstrap(self):
+        self.assertIn("migrate_legacy_h3_models", self.text)
+        for model_path in (
+            "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "vae/minimax_h3_video_vae_fp16.safetensors",
+            "vae/minimax_h3_audio_vae_fp32.safetensors",
+        ):
+            self.assertIn(model_path, self.text)
+        self.assertIn("migrate_legacy_h3_models() {", self.text)
+        migration = self.text.index("      migrate_legacy_h3_models\n")
+        fast_bootstrap = self.text.index('H3_BOOTSTRAP_STAGE="fast_bootstrap"')
+        self.assertLess(migration, fast_bootstrap)
+
     def test_bootstrap_pid_is_removed_after_process_exit(self):
         self.assertIn(
             'H3_BOOTSTRAP_PID_FILE="${H3_BOOTSTRAP_PID_FILE:-/run/h3/bootstrap.pid}"',
