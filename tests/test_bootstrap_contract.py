@@ -43,6 +43,13 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertIn('git -C "$H3_RUNTIME_ROOT" fetch', self.text)
         self.assertIn('git -C "$H3_RUNTIME_ROOT" reset --hard', self.text)
 
+    def test_existing_gateway_is_replaced_before_start(self):
+        self.assertIn("pkill -f '[r]untime.worker_gateway'", self.text)
+        self.assertLess(
+            self.text.index("pkill -f '[r]untime.worker_gateway'"),
+            self.text.index('nohup "$H3_COMFY_PYTHON" -m runtime.worker_gateway'),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

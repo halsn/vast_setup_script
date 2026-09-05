@@ -194,6 +194,8 @@ install_worker_runtime() {
 
 start_worker_gateway() {
   local runtime_config="${H3_RUNTIME_CONFIG:-/run/h3/runtime.json}"
+  pkill -f '[r]untime.worker_gateway' 2>/dev/null || true
+  sleep 1
   H3_WORKER_TOKEN="$H3_WORKER_TOKEN" \
     PYTHONPATH="$H3_RUNTIME_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
     MODEL_CACHE_DIR="$H3_COMFY_DIR/models" \
