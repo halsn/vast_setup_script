@@ -39,6 +39,10 @@ class BootstrapContractTests(unittest.TestCase):
             self.text.index("wait_for_vast_comfy_base()"),
         )
 
+    def test_existing_runtime_checkout_is_refreshed(self):
+        self.assertIn('git -C "$H3_RUNTIME_ROOT" fetch', self.text)
+        self.assertIn('git -C "$H3_RUNTIME_ROOT" reset --hard', self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

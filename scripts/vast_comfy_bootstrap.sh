@@ -16,6 +16,7 @@ H3_COMFY_SERVICE="${H3_COMFY_SERVICE:-comfyui}"
 H3_BUNDLE_ROOT="${H3_BUNDLE_ROOT:-}"
 H3_FAST_URL="${H3_FAST_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/setupp_h3_comfui_fast.sh}"
 H3_RUNTIME_REPOSITORY="${H3_RUNTIME_REPOSITORY:-https://github.com/halsn/vast_setup_script.git}"
+H3_RUNTIME_REVISION="${H3_RUNTIME_REVISION:-main}"
 H3_RUNTIME_ROOT="${H3_RUNTIME_ROOT:-/opt/h3-worker}"
 H3_GATEWAY_PORT="${H3_GATEWAY_PORT:-8190}"
 H3_COMFY_PORT="${H3_COMFY_PORT:-18188}"
@@ -183,7 +184,10 @@ install_worker_runtime() {
     cp "$H3_BUNDLE_ROOT/requirements-runtime.txt" "$H3_RUNTIME_ROOT/requirements-runtime.txt"
   elif [[ ! -d "$H3_RUNTIME_ROOT/.git" ]]; then
     rm -rf "$H3_RUNTIME_ROOT"
-    git clone --depth 1 "$H3_RUNTIME_REPOSITORY" "$H3_RUNTIME_ROOT"
+    git clone --depth 1 --branch "$H3_RUNTIME_REVISION" "$H3_RUNTIME_REPOSITORY" "$H3_RUNTIME_ROOT"
+  else
+    git -C "$H3_RUNTIME_ROOT" fetch --depth 1 origin "$H3_RUNTIME_REVISION"
+    git -C "$H3_RUNTIME_ROOT" reset --hard "origin/$H3_RUNTIME_REVISION"
   fi
   "$H3_COMFY_PYTHON" -m pip install --disable-pip-version-check -r "$H3_RUNTIME_ROOT/requirements-runtime.txt"
 }
