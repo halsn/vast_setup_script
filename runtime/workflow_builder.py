@@ -7,6 +7,7 @@ from that protocol to the API prompt accepted by ``POST /prompt``.
 
 from __future__ import annotations
 
+import random
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Sequence
 
@@ -75,6 +76,8 @@ def _parameters(parameters: Mapping[str, Any]) -> tuple[int, int, int, int]:
     width, height, frames, seed = values
     if width < 32 or height < 32 or frames < 5:
         raise WorkflowBuildError("H3 requires width/height >= 32 and at least 5 frames")
+    if seed < 0:
+        seed = random.SystemRandom().randrange(0, 2**63)
     return width, height, _align_frames(frames), seed
 
 
