@@ -123,6 +123,15 @@ resolve_vast_comfy_base() {
     done < <(pgrep -f 'python.*main.py' 2>/dev/null || true)
   fi
 
+  # The official Vast image runs its user-facing ComfyUI from WORKSPACE.  A
+  # stale/legacy H3_COMFY_DIR must not send models and custom nodes to the
+  # cache-only copy under /opt while the Supervisor service loads /workspace.
+  if use_vast_comfy_base \
+    && [[ -f "${WORKSPACE:-/workspace}/ComfyUI/main.py" ]] \
+    && [[ -z "$H3_COMFY_DIR" || "$H3_COMFY_DIR" == "/opt/workspace-internal/ComfyUI" ]]; then
+    H3_COMFY_DIR="${WORKSPACE:-/workspace}/ComfyUI"
+  fi
+
   local candidates=(
     "$H3_COMFY_DIR"
     "/workspace/ComfyUI"

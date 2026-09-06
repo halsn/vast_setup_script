@@ -52,6 +52,10 @@ class BootstrapContractTests(unittest.TestCase):
             self.text.index('nohup "$H3_COMFY_PYTHON" -m runtime.worker_gateway'),
         )
 
+    def test_official_vast_workspace_comfyui_is_preferred_over_legacy_cache(self):
+        self.assertIn('"${WORKSPACE:-/workspace}/ComfyUI"', self.text)
+        self.assertIn('H3_COMFY_DIR="${WORKSPACE:-/workspace}/ComfyUI"', self.text)
+
     def test_legacy_model_cache_is_reused_before_fast_bootstrap(self):
         self.assertIn("migrate_legacy_h3_models", self.text)
         for model_path in (
