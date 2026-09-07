@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-H3_BOOTSTRAP_VERSION="1.1.8"
+H3_BOOTSTRAP_VERSION="1.1.9"
 H3_MODEL_REPO="Comfy-Org/MiniMax-H3"
 H3_STAGE="startup"
 H3_INSTALL_SAGE="${H3_INSTALL_SAGE:-1}"
@@ -1343,6 +1343,66 @@ get_effective_comfy_command() {
   printf '%s\n' "$command_line"
 }
 
+validate_comfyui_model_catalog() {
+  local url="http://127.0.0.1:$COMFY_PORT/object_info"
+  "$COMFY_PYTHON" - "$url" <<'PY'
+import json
+import sys
+import urllib.request
+
+url = sys.argv[1]
+expected = {
+    "UNETLoader": {
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    },
+    "CLIPLoader": {
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    },
+    "VAELoader": {
+        "minimax_h3_video_vae_fp16.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors",
+    },
+}
+
+try:
+    with urllib.request.urlopen(url, timeout=10) as response:
+        payload = json.load(response)
+except Exception as exc:
+    print(f"Could not read ComfyUI object catalog: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+def strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from strings(item)
+
+missing = []
+for node_name, names in expected.items():
+    node = payload.get(node_name)
+    if not isinstance(node, dict):
+        missing.append(f"{node_name}: node unavailable")
+        continue
+    visible = set(strings(node.get("input", {})))
+    absent = sorted(names - visible)
+    if absent:
+        missing.append(f"{node_name}: " + ", ".join(absent))
+
+if missing:
+    print(
+        "ComfyUI is running but H3 models are not visible in /object_info:\n  - "
+        + "\n  - ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+}
+
 run_health_checks() {
   H3_STAGE="health checks"
   local state branch version revision missing=0 file
@@ -1376,7 +1436,12 @@ run_health_checks() {
   if probe_comfyui; then
     log_ok "ComfyUI HTTP endpoint responds on port $COMFY_PORT"
   else
-    log_warn "Supervisor is RUNNING but http://127.0.0.1:$COMFY_PORT did not respond. Vast portal routing may use another internal port."
+    die "Supervisor is RUNNING but http://127.0.0.1:$COMFY_PORT did not respond."
+  fi
+  if validate_comfyui_model_catalog; then
+    log_ok "ComfyUI model catalog contains all required H3 models"
+  else
+    die "H3 model files exist on disk but the running ComfyUI process cannot see them. Check the active ComfyUI directory/model paths."
   fi
   log_ok "ComfyUI revision: $version ($branch)"
 }
