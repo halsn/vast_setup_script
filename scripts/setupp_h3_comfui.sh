@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-H3_BOOTSTRAP_VERSION="1.1.7"
+H3_BOOTSTRAP_VERSION="1.1.8"
 H3_MODEL_REPO="Comfy-Org/MiniMax-H3"
 H3_STAGE="startup"
 H3_INSTALL_SAGE="${H3_INSTALL_SAGE:-1}"
@@ -114,6 +114,41 @@ use_vast_comfy_base() {
   esac
 }
 
+wait_for_vast_comfy_service() {
+  use_vast_comfy_base || return 1
+
+  local wait_seconds="${H3_VAST_BASE_WAIT_SECONDS:-300}"
+  local deadline=$((SECONDS + wait_seconds))
+  local service=""
+
+  if command_exists pgrep \
+    && ! pgrep -x supervisord >/dev/null 2>&1 \
+    && [[ -x /opt/instance-tools/bin/entrypoint.sh ]]; then
+    log_info "Vast ComfyUI base is still starting; launching the official entrypoint."
+    mkdir -p /var/log/h3
+    nohup bash /opt/instance-tools/bin/entrypoint.sh \
+      >>/var/log/h3/vast-comfy-base.log 2>&1 </dev/null &
+  fi
+
+  while (( SECONDS < deadline )); do
+    if command_exists supervisorctl; then
+      service="$(find_service_name 2>/dev/null || true)"
+      if [[ -n "$service" ]]; then
+        printf '%s\n' "$service"
+        return 0
+      fi
+      # Current official vastai/comfy images use the stable Supervisor
+      # program name "comfyui". Prefer it when the controller already knows
+      # the service even if it has not reached RUNNING yet.
+      if supervisorctl status comfyui >/dev/null 2>&1; then
+        printf '%s\n' "comfyui"
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+  return 1
+}
 find_service_name() {
   if [[ -n "${H3_SERVICE_NAME:-}" ]]; then
     printf '%s\n' "$H3_SERVICE_NAME"
@@ -381,6 +416,10 @@ detect_environment() {
   local process_python=""
   if [[ -z "$SERVICE_NAME" ]]; then
     SERVICE_NAME="$(find_service_name 2>/dev/null || true)"
+  fi
+  if [[ -z "$SERVICE_NAME" ]] && use_vast_comfy_base; then
+    log_info "Waiting for the official Vast ComfyUI Supervisor service."
+    SERVICE_NAME="$(wait_for_vast_comfy_service 2>/dev/null || true)"
   fi
   [[ -n "$SERVICE_NAME" ]] || die "Could not find a Supervisor service containing 'comfy'. Set H3_SERVICE_NAME."
 
