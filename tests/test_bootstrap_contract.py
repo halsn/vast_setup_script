@@ -4,6 +4,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "vast_comfy_bootstrap.sh"
 BASE_SCRIPT = Path(__file__).parents[1] / "scripts" / "setupp_h3_comfui.sh"
+FAST_SCRIPT = Path(__file__).parents[1] / "scripts" / "setupp_h3_comfui_fast.sh"
 
 
 class BootstrapContractTests(unittest.TestCase):
@@ -11,6 +12,7 @@ class BootstrapContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.text = SCRIPT.read_text(encoding="utf-8")
         cls.base_text = BASE_SCRIPT.read_text(encoding="utf-8")
+        cls.fast_text = FAST_SCRIPT.read_text(encoding="utf-8")
 
     def test_main_bootstrap_does_not_require_worker_gateway(self):
         run_bootstrap = self.text[self.text.index("run_bootstrap()"):]
@@ -80,6 +82,14 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertIn("--listen", self.base_text)
         self.assertIn("0.0.0.0", self.base_text)
         self.assertIn("--enable-cors-header", self.base_text)
+
+    def test_fast_online_bootstrap_does_not_prefer_stale_sibling_base(self):
+        self.assertIn('H3_FAST_USE_LOCAL_BASE:-0', self.fast_text)
+        self.assertIn('Fetching current stable H3 bootstrap', self.fast_text)
+        self.assertNotIn(
+            'if [[ -n "$FAST_SCRIPT_DIR" && -f "$FAST_SCRIPT_DIR/setupp_h3_comfui.sh" ]]; then',
+            self.fast_text,
+        )
 
     def test_initial_download_uses_dynamic_disk_budget(self):
         self.assertIn("get_missing_model_disk_budget_gb", self.base_text)
