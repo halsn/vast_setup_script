@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-H3_BOOTSTRAP_VERSION="1.1.9"
+H3_BOOTSTRAP_VERSION="1.1.10"
 H3_MODEL_REPO="Comfy-Org/MiniMax-H3"
 H3_STAGE="startup"
 H3_INSTALL_SAGE="${H3_INSTALL_SAGE:-1}"
@@ -531,8 +531,9 @@ validate_prerequisites() {
   H3_STAGE="preflight validation"
   command_exists supervisorctl || die "supervisorctl is unavailable; use a Supervisor-managed Vast.ai template."
   install_system_prerequisites
+  H3_STAGE="preflight validation"
   [[ -d "$COMFY_DIR/.git" ]] || die "$COMFY_DIR is not a Git checkout."
-  local disk ram missing_models
+  local disk ram missing_models required_disk
   disk="$(get_available_disk_gb "$COMFY_DIR")"
   ram="$(get_system_ram_gb)"
   missing_models="$(get_missing_model_count)"
@@ -540,8 +541,9 @@ validate_prerequisites() {
     (( disk >= H3_CACHED_MODEL_MIN_FREE_GB )) || die "Only ${disk} GB free; H3 models are cached, but at least ${H3_CACHED_MODEL_MIN_FREE_GB} GB must remain available."
     log_ok "H3 model cache: complete; cached models will be reused"
   else
-    (( disk >= 160 )) || die "Only ${disk} GB free; ${missing_models} H3 model file(s) are missing, and at least 160 GB is required for the initial download."
-    log_info "H3 model cache: ${missing_models} file(s) missing; full download disk reserve required"
+    required_disk="$(get_missing_model_disk_budget_gb)"
+    (( disk >= required_disk )) || die "Only ${disk} GB free; ${missing_models} H3 model file(s) are missing and the current download needs about ${required_disk} GB free including temporary download space and reserve."
+    log_info "H3 model cache: ${missing_models} file(s) missing; estimated free-space requirement: ${required_disk} GB"
   fi
   if (( ram < 64 )); then log_warn "System RAM is ${ram} GB; 64 GB or more is recommended."; fi
   log_ok "Free disk: ${disk} GB"
@@ -933,6 +935,36 @@ model_min_bytes() {
     vae/*) printf '%s\n' 100000000 ;;
     *) printf '%s\n' 1000000 ;;
   esac
+}
+
+model_expected_gb() {
+  local path="$1"
+  case "$path" in
+    diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors) printf '%s\n' 21 ;;
+    diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors) printf '%s\n' 21 ;;
+    text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors) printf '%s\n' 16 ;;
+    vae/minimax_h3_video_vae_fp16.safetensors) printf '%s\n' 6 ;;
+    vae/minimax_h3_audio_vae_fp32.safetensors) printf '%s\n' 1 ;;
+    *) printf '%s\n' 1 ;;
+  esac
+}
+
+get_missing_model_disk_budget_gb() {
+  local total=0 largest=0 file expected
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    if model_is_complete "$COMFY_DIR/models/$file" "$(model_min_bytes "$file")"; then
+      continue
+    fi
+    expected="$(model_expected_gb "$file")"
+    ((total+=expected))
+    (( expected > largest )) && largest="$expected"
+  done < <(model_manifest)
+
+  # Downloads are staged beside the final model. Reserve one extra copy of
+  # the largest missing file for Hugging Face/Xet temporary data, plus the
+  # normal post-install free-space reserve.
+  printf '%s\n' "$((total + largest + H3_CACHED_MODEL_MIN_FREE_GB))"
 }
 
 model_is_complete() {
