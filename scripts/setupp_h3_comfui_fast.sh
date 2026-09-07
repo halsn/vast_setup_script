@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-H3_FAST_VERSION="1.1.11"
+H3_FAST_VERSION="1.1.12"
 H3_FAST_METHOD="${H3_FAST_METHOD:-spectrum}"
 H3_FAST_INSTALL_SPECTRUM="${H3_FAST_INSTALL_SPECTRUM:-1}"
 H3_FAST_INSTALL_FIRSTBLOCK="${H3_FAST_INSTALL_FIRSTBLOCK:-1}"
@@ -26,6 +26,10 @@ FAST_BASE_TMP=""
 fast_error() {
   printf '[ERROR] %s\n' "$*" >&2
   return 1
+}
+
+fast_info() {
+  printf '[INFO] %s\n' "$*" >&2
 }
 
 fast_usage() {
@@ -108,7 +112,7 @@ load_base_bootstrap() {
     [[ -n "$local_base" && -f "$local_base" ]] \
       || { fast_error "H3_FAST_USE_LOCAL_BASE=1 but local stable bootstrap is unavailable."; return 1; }
     base_script="$local_base"
-    log_info "Using explicitly requested local stable H3 bootstrap: $base_script"
+    fast_info "Using explicitly requested local stable H3 bootstrap: $base_script"
   else
     command -v curl >/dev/null 2>&1 || fast_error "curl is required for remote execution."
     FAST_BASE_TMP="$(mktemp)"
@@ -118,7 +122,7 @@ load_base_bootstrap() {
     else
       download_url="${download_url}?h3_cachebust=$cachebust"
     fi
-    log_info "Fetching current stable H3 bootstrap from $H3_FAST_BASE_URL"
+    fast_info "Fetching current stable H3 bootstrap from $H3_FAST_BASE_URL"
     if ! curl -fsSL --retry 3 --connect-timeout 15 "$download_url" -o "$FAST_BASE_TMP"; then
       fast_error "Could not download the stable bootstrap: $H3_FAST_BASE_URL"
       return 1
