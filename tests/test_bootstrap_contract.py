@@ -12,25 +12,19 @@ class BootstrapContractTests(unittest.TestCase):
         cls.text = SCRIPT.read_text(encoding="utf-8")
         cls.base_text = BASE_SCRIPT.read_text(encoding="utf-8")
 
-    def test_token_guard_precedes_gateway_start(self):
-        self.assertIn('if [[ -z "${H3_WORKER_TOKEN:-}" ]]; then', self.text)
-        run_bootstrap = self.text.index("run_bootstrap()")
-        guard_call = self.text.index("  require_worker_token\n", run_bootstrap)
-        self.assertLess(
-            guard_call,
-            self.text.index("  start_worker_gateway", run_bootstrap),
-        )
+    def test_main_bootstrap_does_not_require_worker_gateway(self):
+        run_bootstrap = self.text[self.text.index("run_bootstrap()"):]
+        self.assertNotIn("  require_worker_token\n", run_bootstrap)
+        self.assertNotIn("  start_worker_gateway\n", run_bootstrap)
+        self.assertNotIn("  wait_for_gateway_health\n", run_bootstrap)
+        self.assertNotIn("  wait_for_worker_ready\n", run_bootstrap)
 
-    def test_final_ready_checks_gateway_and_worker(self):
-        self.assertIn("wait_for_gateway_health", self.text)
-        self.assertIn("wait_for_worker_ready", self.text)
+    def test_final_ready_depends_on_native_comfyui(self):
+        run_bootstrap = self.text[self.text.index("run_bootstrap()"):]
+        self.assertIn("  wait_for_comfyui\n", run_bootstrap)
         self.assertLess(
-            self.text.index("wait_for_gateway_health"),
-            self.text.index('write_bootstrap_status "ready"'),
-        )
-        self.assertLess(
-            self.text.index("wait_for_worker_ready"),
-            self.text.index('write_bootstrap_status "ready"'),
+            run_bootstrap.index("  wait_for_comfyui\n"),
+            run_bootstrap.index('write_bootstrap_status "ready"'),
         )
 
     def test_bootstrap_starts_official_base_when_it_is_not_running(self):
