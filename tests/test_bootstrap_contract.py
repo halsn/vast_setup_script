@@ -81,6 +81,16 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertIn("0.0.0.0", self.base_text)
         self.assertIn("--enable-cors-header", self.base_text)
 
+    def test_initial_download_uses_dynamic_disk_budget(self):
+        self.assertIn("get_missing_model_disk_budget_gb", self.base_text)
+        self.assertIn("model_expected_gb", self.base_text)
+        self.assertNotIn("disk >= 160", self.base_text)
+        self.assertIn(
+            "estimated free-space requirement: ${required_disk} GB",
+            self.base_text,
+        )
+        self.assertIn('H3_STAGE="preflight validation"', self.base_text)
+
     def test_ready_requires_h3_models_in_comfyui_object_catalog(self):
         self.assertIn("validate_comfyui_model_catalog", self.base_text)
         self.assertIn("/object_info", self.base_text)
