@@ -123,8 +123,9 @@ wait_for_vast_comfy_service() {
 
   if command_exists pgrep \
     && ! pgrep -x supervisord >/dev/null 2>&1 \
+    && ! pgrep -f '[/]opt/instance-tools/bin/entrypoint.sh' >/dev/null 2>&1 \
     && [[ -x /opt/instance-tools/bin/entrypoint.sh ]]; then
-    log_info "Vast ComfyUI base is still starting; launching the official entrypoint."
+    log_info "Vast ComfyUI base is not running; launching the official entrypoint."
     mkdir -p /var/log/h3
     nohup bash /opt/instance-tools/bin/entrypoint.sh \
       >>/var/log/h3/vast-comfy-base.log 2>&1 </dev/null &
