@@ -83,6 +83,12 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertIn("0.0.0.0", self.base_text)
         self.assertIn("--enable-cors-header", self.base_text)
 
+    def test_fast_bootstrap_can_log_before_stable_script_is_sourced(self):
+        self.assertIn("fast_info() {", self.fast_text)
+        load = self.fast_text[self.fast_text.index("load_base_bootstrap() {"):self.fast_text.index("install_fast_node_requirements() {")]
+        self.assertIn('fast_info "Fetching current stable H3 bootstrap', load)
+        self.assertNotIn('log_info "Fetching current stable H3 bootstrap', load)
+
     def test_fast_online_bootstrap_does_not_prefer_stale_sibling_base(self):
         self.assertIn('H3_FAST_USE_LOCAL_BASE:-0', self.fast_text)
         self.assertIn('Fetching current stable H3 bootstrap', self.fast_text)
