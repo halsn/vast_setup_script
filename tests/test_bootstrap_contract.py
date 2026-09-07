@@ -69,6 +69,13 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertIn("log_info() {", self.text)
         self.assertIn("log_warn() {", self.text)
 
+    def test_stable_bootstrap_waits_for_current_vast_supervisor_service(self):
+        self.assertIn("wait_for_vast_comfy_service", self.base_text)
+        self.assertIn("supervisorctl status comfyui", self.base_text)
+        self.assertIn("/opt/instance-tools/bin/entrypoint.sh", self.base_text)
+        self.assertIn("/opt/workspace-internal/ComfyUI/main.py", self.base_text)
+        self.assertNotIn("/etc/vast_boot.d/boot_default.sh", self.base_text)
+
     def test_comfyui_is_patched_for_public_native_api(self):
         self.assertIn("--listen", self.base_text)
         self.assertIn("0.0.0.0", self.base_text)
