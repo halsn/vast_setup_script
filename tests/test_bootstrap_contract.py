@@ -81,6 +81,17 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertIn("0.0.0.0", self.base_text)
         self.assertIn("--enable-cors-header", self.base_text)
 
+    def test_ready_requires_h3_models_in_comfyui_object_catalog(self):
+        self.assertIn("validate_comfyui_model_catalog", self.base_text)
+        self.assertIn("/object_info", self.base_text)
+        self.assertIn("UNETLoader", self.base_text)
+        self.assertIn("CLIPLoader", self.base_text)
+        self.assertIn("VAELoader", self.base_text)
+        self.assertIn(
+            "ComfyUI model catalog contains all required H3 models",
+            self.base_text,
+        )
+
     def test_model_size_validation_follows_legacy_cache_symlinks(self):
         self.assertIn("stat -Lc '%s'", self.base_text)
 
