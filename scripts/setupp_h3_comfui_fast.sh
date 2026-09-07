@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-H3_FAST_VERSION="1.1.10"
+H3_FAST_VERSION="1.1.11"
 H3_FAST_METHOD="${H3_FAST_METHOD:-spectrum}"
 H3_FAST_INSTALL_SPECTRUM="${H3_FAST_INSTALL_SPECTRUM:-1}"
 H3_FAST_INSTALL_FIRSTBLOCK="${H3_FAST_INSTALL_FIRSTBLOCK:-1}"
@@ -99,8 +99,16 @@ trap cleanup_fast_bootstrap EXIT
 
 load_base_bootstrap() {
   local base_script="" download_url="$H3_FAST_BASE_URL" cachebust
-  if [[ -n "$FAST_SCRIPT_DIR" && -f "$FAST_SCRIPT_DIR/setupp_h3_comfui.sh" ]]; then
-    base_script="$FAST_SCRIPT_DIR/setupp_h3_comfui.sh"
+  local local_base="${FAST_SCRIPT_DIR:+$FAST_SCRIPT_DIR/setupp_h3_comfui.sh}"
+
+  # The deployment runner may leave an older stable bootstrap beside this fast
+  # wrapper under /run/h3. Never prefer that stale sibling during normal online
+  # execution. Local sourcing is reserved for explicit offline/bundled runs.
+  if [[ "${H3_FAST_USE_LOCAL_BASE:-0}" == "1" ]]; then
+    [[ -n "$local_base" && -f "$local_base" ]] \
+      || { fast_error "H3_FAST_USE_LOCAL_BASE=1 but local stable bootstrap is unavailable."; return 1; }
+    base_script="$local_base"
+    log_info "Using explicitly requested local stable H3 bootstrap: $base_script"
   else
     command -v curl >/dev/null 2>&1 || fast_error "curl is required for remote execution."
     FAST_BASE_TMP="$(mktemp)"
@@ -110,6 +118,7 @@ load_base_bootstrap() {
     else
       download_url="${download_url}?h3_cachebust=$cachebust"
     fi
+    log_info "Fetching current stable H3 bootstrap from $H3_FAST_BASE_URL"
     if ! curl -fsSL --retry 3 --connect-timeout 15 "$download_url" -o "$FAST_BASE_TMP"; then
       fast_error "Could not download the stable bootstrap: $H3_FAST_BASE_URL"
       return 1
