@@ -217,7 +217,7 @@ download_fast_script() {
 }
 
 install_worker_runtime() {
-  write_bootstrap_status "starting_gateway" 0.12 "准备 H3 Worker Gateway"
+  write_bootstrap_status "preparing_runtime" 0.12 "准备 H3 运行时"
   if [[ -n "$H3_BUNDLE_ROOT" && -f "$H3_BUNDLE_ROOT/requirements-runtime.txt" ]]; then
     rm -rf "$H3_RUNTIME_ROOT"
     mkdir -p "$H3_RUNTIME_ROOT"
@@ -348,14 +348,9 @@ run_bootstrap() {
   H3_BOOTSTRAP_STAGE="waiting_for_base"
   write_bootstrap_status "starting" 0 "正在初始化 Vast ComfyUI"
   wait_for_vast_comfy_base || { write_bootstrap_status "bootstrap_failed" 0 "Vast 基础环境未就绪" "等待基础环境超时"; return 1; }
-  H3_BOOTSTRAP_STAGE="checking_worker_token"
-  require_worker_token
   H3_BOOTSTRAP_STAGE="installing_worker_runtime"
   install_worker_runtime
   H3_BOOTSTRAP_STAGE="fast_bootstrap"
-  start_worker_gateway
-  H3_BOOTSTRAP_STAGE="gateway_health"
-  wait_for_gateway_health
   write_bootstrap_status "installing_h3" 0.2 "正在执行 H3 Fast 初始化"
   local fast_script
   fast_script="$(download_fast_script)"
@@ -385,9 +380,7 @@ run_bootstrap() {
   H3_BOOTSTRAP_STAGE="health_check"
   write_bootstrap_status "starting_comfyui" 0.9 "正在确认 ComfyUI 已启动"
   wait_for_comfyui
-  H3_BOOTSTRAP_STAGE="worker_readiness"
-  wait_for_worker_ready
-  write_bootstrap_status "ready" 1 "H3 Worker 已就绪"
+  write_bootstrap_status "ready" 1 "H3 ComfyUI 已就绪"
   H3_BOOTSTRAP_SUCCEEDED=1
 }
 
