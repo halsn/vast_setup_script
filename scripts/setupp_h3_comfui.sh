@@ -96,14 +96,11 @@ use_vast_comfy_base() {
     1|true|yes) return 0 ;;
     0|false|no) return 1 ;;
     auto)
-      if [[ "${IMAGE_TYPE:-}" == "vast" \
-        && -x /opt/instance-tools/bin/entrypoint.sh \
-        && -x /venv/main/bin/python ]]; then
-        return 0
-      fi
       if [[ -x /opt/instance-tools/bin/entrypoint.sh \
         && -x /venv/main/bin/python \
-        && -f /etc/vast_boot.d/boot_default.sh ]]; then
+        && ( -f /opt/workspace-internal/ComfyUI/main.py \
+          || -n "${COMFYUI_ARGS:-}" \
+          || "${IMAGE_TYPE:-}" == "vast" ) ]]; then
         return 0
       fi
       return 1
