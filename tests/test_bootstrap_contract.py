@@ -75,6 +75,11 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertIn("log_info() {", self.text)
         self.assertIn("log_warn() {", self.text)
 
+    def test_comfyui_is_patched_for_public_native_api(self):
+        self.assertIn("--listen", self.base_text)
+        self.assertIn("0.0.0.0", self.base_text)
+        self.assertIn("--enable-cors-header", self.base_text)
+
     def test_model_size_validation_follows_legacy_cache_symlinks(self):
         self.assertIn("stat -Lc '%s'", self.base_text)
 
