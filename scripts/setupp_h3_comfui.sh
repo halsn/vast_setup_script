@@ -967,7 +967,7 @@ download_h3_models() {
 expected_runtime_flags() {
   local vram_mb="$1"
   if (( vram_mb >= 80000 )); then printf '%s\n' '--highvram'; fi
-  printf '%s\n' '--reserve-vram' '2' '--preview-method' 'none'
+  printf '%s\n' '--listen' '0.0.0.0' '--enable-cors-header' '*' '--reserve-vram' '2' '--preview-method' 'none'
   if [[ "${H3_USE_SAGE_GLOBAL:-0}" == "1" ]]; then
     printf '%s\n' '--use-sage-attention'
   fi
@@ -1027,6 +1027,8 @@ for i, raw in enumerate(lines):
     if vram >= 80000:
         expected.append((r'(?<!\S)--highvram(?!\S)', '--highvram'))
     expected.extend([
+        (r'(?<!\S)--listen(?:\s+0\.0\.0\.0)?(?!\S)', '--listen 0.0.0.0'),
+        (r'(?<!\S)--enable-cors-header(?:\s+[^\s]+)?(?!\S)', "--enable-cors-header '*'"),
         (r'(?<!\S)--reserve-vram(?:\s+2|=2)(?!\S)', '--reserve-vram 2'),
         (r'(?<!\S)--preview-method(?:\s+none|=none)(?!\S)', '--preview-method none'),
     ])
@@ -1158,6 +1160,10 @@ for i, raw in enumerate(lines):
         wanted = []
         if vram >= 80000 and not re.search(r"(^|\s)--highvram(?=\s|$)", value):
             wanted.append("--highvram")
+        if not re.search(r"(^|\s)--listen(?=\s|$)", value):
+            wanted += ["--listen", "0.0.0.0"]
+        if not re.search(r"(^|\s)--enable-cors-header(?=\s|$)", value):
+            wanted += ["--enable-cors-header", "*"]
         if not re.search(r"(^|\s)--reserve-vram(?:=|\s+)", value):
             wanted += ["--reserve-vram", "2"]
         if not re.search(r"(^|\s)--preview-method(?:=|\s+)", value):
@@ -1267,6 +1273,10 @@ import re, sys
 
 command = sys.argv[1]
 flags = []
+if re.search(r"(?:^|\s)--listen(?=\s|$|[\"'])", command):
+    flags.append("--listen")
+if re.search(r"(?:^|\s)--enable-cors-header(?=\s|$|[\"'])", command):
+    flags.append("--enable-cors-header")
 if re.search(r"(?:^|\s)--highvram(?=\s|$|[\"'])", command):
     flags.append("--highvram")
 match = re.search(r"(?:^|\s)--reserve-vram(?:=|\s+)([^\s\"']+)", command)
