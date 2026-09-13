@@ -87,9 +87,9 @@
     },
     {
       "id": "h3_fast_turbo",
-      "display_name": "H3 Fast Turbo",
+      "display_name": "H3 LightX2V Turbo 4-step",
       "mode": "t2v",
-      "workflow": "H3_Fast_Turbo.json",
+      "workflow": "H3_T2V_Accelerated.json",
       "required_models": [
         "minimax-h3-fl2va-pruned-int8-convrot",
         "qwen3vl-32b-minimax-h3-nvfp4-awq",
