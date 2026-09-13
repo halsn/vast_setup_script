@@ -14,7 +14,12 @@ class ReadinessError(RuntimeError):
 NODE_FOR_FEATURE = {
     "h3": "ComfyUI-H3-Worker",
     "turbo": "ComfyUI-MiniMax-H3-Turbo",
+    "pdd": "ComfyUI-MiniMax-H3-PDD-Acc",
 }
+PDD_FILES = (
+    "MiniMax-H3-FL2VA-Acc-8Step.safetensors",
+    "MiniMax-H3-Ref2VA-Acc-8Step.safetensors",
+)
 
 
 def build_ready_payload(
@@ -152,14 +157,23 @@ def _enabled_features(runtime: Mapping[str, Any], custom_nodes: Path) -> List[st
     for source in (runtime.get("features"), profile.get("enabled_features")):
         if isinstance(source, list):
             for feature in source:
-                if isinstance(feature, str) and feature.strip() and feature.strip() not in {"h3", "turbo"}:
-                    if feature.strip() not in values:
-                        values.append(feature.strip())
+                if (
+                    isinstance(feature, str)
+                    and feature.strip()
+                    and feature.strip() not in {"h3", "turbo", "pdd"}
+                    and feature.strip() not in values
+                ):
+                    values.append(feature.strip())
 
     if (custom_nodes / NODE_FOR_FEATURE["h3"]).is_dir():
         values.insert(0, "h3")
     if (custom_nodes / NODE_FOR_FEATURE["turbo"]).is_dir():
         values.append("turbo")
+
+    pdd_node = custom_nodes / NODE_FOR_FEATURE["pdd"]
+    pdd_dir = custom_nodes.parent / "models" / "pdd_acc"
+    if pdd_node.is_dir() and all((pdd_dir / filename).is_file() for filename in PDD_FILES):
+        values.append("pdd")
 
     attention = profile.get("attention")
     if isinstance(attention, str) and attention.startswith("sage") and "sageattention" not in values:
