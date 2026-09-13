@@ -2,7 +2,7 @@
 
 这是 H3 Worker 在 Vast.ai `vastai/comfy` 模板上的公开部署资源仓库。
 
-当前仓库采用“基础 H3 + 独立部署 profile”的结构。所有 H3 部署脚本直接平铺在 `scripts/` 下，不使用 `experimental/` 子目录。
+当前仓库采用“基础 H3 + 独立部署 profile”的结构。所有 H3 部署脚本直接平铺在 `scripts/` 下，不使用 `experimental/` 子目录，也不再保留旧的混合 `fast` 部署入口。
 
 ## 部署流程
 
@@ -25,9 +25,8 @@
 | VDN | `scripts/setupp_h3_comfui_vdn.sh` | VDN-H3 hybrid attention，默认 8-step DMD stage |
 | Cache | `scripts/setupp_h3_comfui_cache.sh` | Spectrum / FirstBlockCache |
 | FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | FastVideo VSA + 4-step LoRA，目前以 FL2VA 为主 |
-| Legacy Fast | `scripts/setupp_h3_comfui_fast.sh` | 旧调用兼容；新代码不要再直接依赖它 |
 
-机器可读映射位于 `config/deployment_profiles.json`，桌面端或 `vast_workspace` 可以按 profile id 选择脚本，而不需要硬编码具体算法实现。
+机器可读的 profile 元数据位于 `config/deployment_profiles.json`。`vast_workspace` 仍以应用 profile 为配置源，并实时发现 `scripts/` 下可部署脚本；这里的 JSON 用于脚本侧元数据、文档和校验，不重复实现一套工作台配置逻辑。
 
 ### Native
 
@@ -88,7 +87,7 @@ FirstBlockCache：
 H3_CACHE_METHOD=firstblock bash setupp_h3_comfui_cache.sh
 ```
 
-一次只启用一种 cache 路线。
+一次只启用一种 cache 路线。Cache profile 自己安装节点并生成 `H3_Cache_Active.json`，不再依赖旧 `fast` 脚本。
 
 ### FastH3 / VSA
 
@@ -132,6 +131,6 @@ ssh -p <ssh-port> root@<ssh-host> 'nohup bash -lc "set -a; . /run/h3/worker.env;
 
 - `scripts/`：Vast 启动入口、H3 基础脚本、平铺的 H3 profile 脚本和 backend 构建辅助脚本
 - `runtime/`：GPU 检测、兼容性选择、缓存、健康检查和 Worker Gateway
-- `config/`：GPU 兼容矩阵、模型清单、工作台模板和 deployment profile 注册表
+- `config/`：GPU 兼容矩阵、模型清单、工作台模板和 deployment profile 元数据
 - `tests/`：bootstrap、gateway、workflow 和 profile 静态契约测试
 - `requirements-runtime.txt`：Worker runtime 依赖
