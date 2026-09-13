@@ -19,7 +19,7 @@ fi
 source "$COMMON"
 
 REFINE_REQUIRED_FREE_GB="${REFINE_REQUIRED_FREE_GB:-3}"
-NODE_DIR="$COMFY_DIR/custom_nodes/Comfyui_Minimax_h3_latent_Upscaler"
+NODE_NAME="Comfyui_Minimax_h3_latent_Upscaler"
 NODE_REPO="https://github.com/xmarre/Comfyui_Minimax_h3_latent_Upscaler-Plus.git"
 NODE_REV="620165a311de9b28a36260219fb5cd370a304e3c"
 REFINE_MODEL_REPO="LBH-123-AI/Minimax_h3_latent_Upscaler"
@@ -50,23 +50,24 @@ refine_preflight_disk() {
 }
 
 install_pinned_refine_node() {
-  mkdir -p "$(dirname "$NODE_DIR")"
-  if [[ -e "$NODE_DIR" && ! -d "$NODE_DIR/.git" ]]; then
-    h3_profile_error "Existing refine node path is not a git checkout: $NODE_DIR"
+  local node_dir="$COMFY_DIR/custom_nodes/$NODE_NAME"
+  mkdir -p "$(dirname "$node_dir")"
+  if [[ -e "$node_dir" && ! -d "$node_dir/.git" ]]; then
+    h3_profile_error "Existing refine node path is not a git checkout: $node_dir"
     return 1
   fi
 
-  if [[ ! -d "$NODE_DIR/.git" ]]; then
-    git clone --filter=blob:none "$NODE_REPO" "$NODE_DIR"
+  if [[ ! -d "$node_dir/.git" ]]; then
+    git clone --filter=blob:none "$NODE_REPO" "$node_dir"
   fi
 
-  git -C "$NODE_DIR" fetch --force --depth=1 origin "$NODE_REV"
-  git -C "$NODE_DIR" checkout --detach --force "$NODE_REV"
+  git -C "$node_dir" fetch --force --depth=1 origin "$NODE_REV"
+  git -C "$node_dir" checkout --detach --force "$NODE_REV"
   local actual_rev
-  actual_rev="$(git -C "$NODE_DIR" rev-parse HEAD)"
+  actual_rev="$(git -C "$node_dir" rev-parse HEAD)"
   [[ "$actual_rev" == "$NODE_REV" ]] \
     || { h3_profile_error "Refine custom node revision mismatch: $actual_rev"; return 1; }
-  h3_profile_install_requirements "$NODE_DIR"
+  h3_profile_install_requirements "$node_dir"
 }
 
 sha256_file() {
