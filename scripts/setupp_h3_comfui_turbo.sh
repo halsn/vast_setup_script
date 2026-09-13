@@ -22,11 +22,10 @@ source "$COMMON"
 
 H3_TURBO_REPO="${H3_TURBO_REPO:-lightx2v/Minimax-h3-Turbo}"
 H3_TURBO_INSTALL_FL2VA_4="${H3_TURBO_INSTALL_FL2VA_4:-1}"
-H3_TURBO_INSTALL_FL2VA_8="${H3_TURBO_INSTALL_FL2VA_8:-1}"
+H3_TURBO_INSTALL_FL2VA_8="${H3_TURBO_INSTALL_FL2VA_8:-0}"
 H3_TURBO_INSTALL_REF2VA_4="${H3_TURBO_INSTALL_REF2VA_4:-0}"
 H3_TURBO_INSTALL_REF2VA_8="${H3_TURBO_INSTALL_REF2VA_8:-0}"
 H3_TURBO_MIN_COMFYUI_VERSION="${H3_TURBO_MIN_COMFYUI_VERSION:-0.31.0}"
-H3_TURBO_WORKFLOW_URL="${H3_TURBO_WORKFLOW_URL:-https://raw.githubusercontent.com/ModelTC/Minimax-H3-Turbo/main/example_workflows/video_minimax_h3_t2v_lightx2v_turbo.json}"
 
 ensure_turbo_comfyui_version() {
   local current
@@ -53,24 +52,6 @@ ensure_turbo_comfyui_version() {
   log_ok "LightX2V Turbo ComfyUI requirement satisfied after update: $current"
 }
 
-install_turbo_workflow() {
-  local workflow_dir="$COMFY_DIR/custom_nodes/ComfyUI-H3-Worker/example_workflows"
-  local target="$workflow_dir/H3_Fast_Turbo.json"
-  local tmp="$target.part"
-  mkdir -p "$workflow_dir"
-  log_info "Installing the official LightX2V T2V workflow contract."
-  curl -fsSL --retry 3 --connect-timeout 15 "$H3_TURBO_WORKFLOW_URL" -o "$tmp"
-  "$COMFY_PYTHON" - "$tmp" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as stream:
-    value = json.load(stream)
-if not isinstance(value, dict) or not value.get("nodes"):
-    raise SystemExit("LightX2V workflow is not a valid ComfyUI workflow JSON")
-PY
-  mv -f "$tmp" "$target"
-  log_ok "LightX2V Turbo workflow installed: $target"
-}
-
 main_turbo() {
   h3_profile_prepare_base
   ensure_turbo_comfyui_version
@@ -89,9 +70,8 @@ main_turbo() {
     h3_profile_hf_file "$H3_TURBO_REPO" \
       "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors" "$dir"
 
-  install_turbo_workflow
   h3_profile_finish
-  log_ok "H3 Turbo profile ready (LightX2V FL2VA 4-step v1.2 + optional 8-step assets; ComfyUI core nodes)."
+  log_ok "H3 Turbo profile ready (LightX2V FL2VA 4-step v1.2; optional 8-step/Ref2VA assets; ComfyUI core nodes)."
 }
 
 main_turbo "$@"
