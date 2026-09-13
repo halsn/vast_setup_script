@@ -1,8 +1,8 @@
 """Build the small, native ComfyUI API graphs used by the desktop client.
 
 The desktop protocol deliberately carries logical template IDs instead of
-shipping the UI canvas format.  This module is the single translation point
-from that protocol to the API prompt accepted by ``POST /prompt``.
+shipping the UI canvas format. This module translates those IDs into the API
+prompt accepted by ``POST /prompt``.
 """
 
 from __future__ import annotations
@@ -18,13 +18,19 @@ TEXT_MODEL = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 FL2VA_MODEL = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 REF2VA_MODEL = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
 TURBO_LORA = "minimax_h3_turbo_v4_step600_ema.safetensors"
+PDD_FL2VA = "MiniMax-H3-FL2VA-Acc-8Step.safetensors"
+PDD_REF2VA = "MiniMax-H3-Ref2VA-Acc-8Step.safetensors"
 
 _TEMPLATE_MODES = {
     "h3_t2v": "t2v",
     "h3_fast_turbo": "t2v",
+    "h3_pdd_t2v": "t2v",
     "h3_i2v": "i2v",
+    "h3_pdd_i2v": "i2v",
     "h3_r2v": "r2v",
+    "h3_pdd_r2v": "r2v",
 }
+_PDD_TEMPLATES = {"h3_pdd_t2v", "h3_pdd_i2v", "h3_pdd_r2v"}
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 
 
@@ -99,12 +105,9 @@ def _prompt(prompt: str, negative_prompt: str) -> str:
 def _base_graph(
     *,
     model_name: str,
-    prompt: str,
-    width: int,
-    height: int,
-    frames: int,
     seed: int,
-    steps: int,
+    acceleration: str,
+    pdd_file: str | None,
     gpu_memory_mib: int | None,
 ) -> dict[str, dict[str, Any]]:
     workflow: dict[str, dict[str, Any]] = {
@@ -113,41 +116,64 @@ def _base_graph(
         "unet": _node("UNETLoader", unet_name=model_name, weight_dtype="default"),
         "clip": _node("CLIPLoader", clip_name=TEXT_MODEL, type="minimax", device="default"),
         "noise": _node("RandomNoise", noise_seed=seed, control_after_generate="fixed"),
-        "sampler_select": _node("KSamplerSelect", sampler_name="res_multistep"),
-        "scheduler": _node(
-            "BasicScheduler",
-            model=_connection("model"),
-            scheduler="simple",
-            steps=steps,
-            denoise=1.0,
-        ),
         "guider": _node(
             "BasicGuider",
-            model=_connection("model"),
+            model=_connection("unet"),
             conditioning=_connection("conditioner", 0),
         ),
     }
-    if steps == 4:
-        workflow["turbo_lora"] = _node(
-            "MiniMaxH3TurboLoRA",
-            model=_connection("unet"),
-            lora_name=TURBO_LORA,
-            strength=1.0,
-            low_vram=bool(gpu_memory_mib is not None and gpu_memory_mib < 24_000),
-        )
-        model_id = "turbo_lora"
-        workflow["turbo_sampler"] = _node("MiniMaxH3TurboSampler")
-    else:
-        model_id = "unet"
 
-    workflow["scheduler"]["inputs"]["model"] = _connection(model_id)
-    workflow["guider"]["inputs"]["model"] = _connection(model_id)
+    if acceleration == "pdd":
+        if not pdd_file:
+            raise WorkflowBuildError("PDD workflow is missing its checkpoint pairing")
+        workflow["pdd_apply"] = _node(
+            "MiniMaxH3PDDAccApply",
+            model=_connection("unet"),
+            pdd_file=pdd_file,
+            nfe="8",
+            lora_strength=1.0,
+            head_strength=1.0,
+            on_off_grid="error",
+            partition_check="error",
+        )
+        workflow["sampler_select"] = _node("KSamplerSelect", sampler_name="euler")
+        workflow["guider"]["inputs"]["model"] = _connection("pdd_apply")
+        sampler_id = "sampler_select"
+        sigma_id = "pdd_apply"
+        sigma_output = 1
+    else:
+        workflow["sampler_select"] = _node("KSamplerSelect", sampler_name="res_multistep")
+        steps = 4 if acceleration == "turbo" else 20
+        model_id = "unet"
+        sampler_id = "sampler_select"
+        if acceleration == "turbo":
+            workflow["turbo_lora"] = _node(
+                "MiniMaxH3TurboLoRA",
+                model=_connection("unet"),
+                lora_name=TURBO_LORA,
+                strength=1.0,
+                low_vram=bool(gpu_memory_mib is not None and gpu_memory_mib < 24_000),
+            )
+            workflow["turbo_sampler"] = _node("MiniMaxH3TurboSampler")
+            model_id = "turbo_lora"
+            sampler_id = "turbo_sampler"
+        workflow["scheduler"] = _node(
+            "BasicScheduler",
+            model=_connection(model_id),
+            scheduler="simple",
+            steps=steps,
+            denoise=1.0,
+        )
+        workflow["guider"]["inputs"]["model"] = _connection(model_id)
+        sigma_id = "scheduler"
+        sigma_output = 0
+
     workflow["sampler"] = _node(
         "SamplerCustomAdvanced",
         noise=_connection("noise"),
         guider=_connection("guider"),
-        sampler=_connection("turbo_sampler" if steps == 4 else "sampler_select"),
-        sigmas=_connection("scheduler"),
+        sampler=_connection(sampler_id),
+        sigmas=_connection(sigma_id, sigma_output),
         latent_image=_connection("conditioner", 1),
     )
     workflow["decode_video"] = _node(
@@ -190,15 +216,20 @@ def build_h3_prompt(
         raise WorkflowBuildError(f"unsupported H3 template: {template_id}")
     width, height, frames, seed = _parameters(parameters)
     text = _prompt(prompt, negative_prompt)
-    steps = 4 if template_id == "h3_fast_turbo" else 20
+    acceleration = (
+        "pdd"
+        if template_id in _PDD_TEMPLATES
+        else "turbo"
+        if template_id == "h3_fast_turbo"
+        else "native"
+    )
+    model_name = REF2VA_MODEL if mode == "r2v" else FL2VA_MODEL
+    pdd_file = PDD_REF2VA if mode == "r2v" else PDD_FL2VA
     workflow = _base_graph(
-        model_name=REF2VA_MODEL if mode == "r2v" else FL2VA_MODEL,
-        prompt=text,
-        width=width,
-        height=height,
-        frames=frames,
+        model_name=model_name,
         seed=seed,
-        steps=steps,
+        acceleration=acceleration,
+        pdd_file=pdd_file if acceleration == "pdd" else None,
         gpu_memory_mib=gpu_memory_mib,
     )
 
@@ -238,7 +269,7 @@ def build_h3_prompt(
     }
     image_index = 0
     video_index = 0
-    for asset_index, asset in enumerate(assets):
+    for asset in assets:
         role = _asset_role(asset)
         path = _asset_path(asset)
         suffix = PurePosixPath(path).suffix.lower()
@@ -251,8 +282,12 @@ def build_h3_prompt(
             workflow[components_id] = _node(
                 "GetVideoComponents", video=_connection(load_id)
             )
-            reference_inputs[f"ref_videos.ref_video_{video_index}"] = _connection(components_id, 0)
-            reference_inputs[f"ref_video_audios.ref_video_audio_{video_index}"] = _connection(components_id, 1)
+            reference_inputs[f"ref_videos.ref_video_{video_index}"] = _connection(
+                components_id, 0
+            )
+            reference_inputs[f"ref_video_audios.ref_video_audio_{video_index}"] = _connection(
+                components_id, 1
+            )
             video_index += 1
         else:
             load_id = f"reference_{image_index}"

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "native",
+      "display_name": "H3 Native",
+      "script": "scripts/setupp_h3_comfui.sh",
+      "status": "stable",
+      "notes": "Native H3 base with SageAttention and official workflows."
+    },
+    {
+      "id": "turbo",
+      "display_name": "H3 Turbo",
+      "script": "scripts/setupp_h3_comfui_turbo.sh",
+      "status": "stable",
+      "notes": "LightX2V 4/8-step LoRAs on native ComfyUI H3 nodes."
+    },
+    {
+      "id": "pdd",
+      "display_name": "H3 PDD 8-step",
+      "script": "scripts/setupp_h3_comfui_pdd.sh",
+      "status": "stable",
+      "notes": "Alibaba PDD 8-step FL2VA/Ref2VA acceleration."
+    },
+    {
+      "id": "vdn",
+      "display_name": "H3 VDN",
+      "script": "scripts/setupp_h3_comfui_vdn.sh",
+      "status": "stable",
+      "notes": "Video Delta Net hybrid attention, defaulting to the released 8-step DMD stage."
+    },
+    {
+      "id": "cache",
+      "display_name": "H3 Cache",
+      "script": "scripts/setupp_h3_comfui_cache.sh",
+      "status": "stable",
+      "notes": "Spectrum or FirstBlockCache, selected with H3_CACHE_METHOD."
+    },
+    {
+      "id": "fasth3",
+      "display_name": "H3 FastH3 VSA",
+      "script": "scripts/setupp_h3_comfui_fasth3.sh",
+      "status": "preview",
+      "notes": "FastVideo VSA + 4-step LoRA; currently FL2VA only."
+    }
+  ]
+}
