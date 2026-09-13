@@ -42,13 +42,6 @@
       "script": "scripts/setupp_h3_comfui_fasth3.sh",
       "status": "preview",
       "notes": "FastVideo VSA + 4-step LoRA; currently FL2VA only."
-    },
-    {
-      "id": "legacy-fast",
-      "display_name": "H3 Legacy Fast",
-      "script": "scripts/setupp_h3_comfui_fast.sh",
-      "status": "legacy",
-      "notes": "Compatibility entry for existing callers; new integrations should use a dedicated profile."
     }
   ]
 }
