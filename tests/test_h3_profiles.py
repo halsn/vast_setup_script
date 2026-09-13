@@ -5,6 +5,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = [
     "scripts/h3_profile_common.sh",
+    "scripts/setupp_h3_comfui_fast.sh",
     "scripts/setupp_h3_comfui_turbo.sh",
     "scripts/setupp_h3_comfui_cache.sh",
     "scripts/setupp_h3_comfui_pdd.sh",
@@ -31,3 +32,22 @@ def test_deployment_profile_registry_points_to_real_scripts():
         assert profile["id"] not in ids
         ids.add(profile["id"])
         assert (ROOT / profile["script"]).is_file(), profile["script"]
+
+
+def test_legacy_fast_is_only_a_compatibility_dispatcher():
+    path = ROOT / "scripts" / "setupp_h3_comfui_fast.sh"
+    text = path.read_text()
+    assert len(text.splitlines()) <= 120
+    assert "setupp_h3_comfui_cache.sh" in text
+    assert "setupp_h3_comfui_turbo.sh" in text
+    assert "ComfyUI-Spectrum-MiniMax-H3" not in text
+    assert "ComfyUI-MiniMaxH3-FirstBlockCache" not in text
+    assert "Larryvrh/ComfyUI-MiniMax-H3-Turbo" not in text
+
+
+def test_cache_profile_owns_cache_implementation():
+    text = (ROOT / "scripts" / "setupp_h3_comfui_cache.sh").read_text()
+    assert "setupp_h3_comfui_fast.sh" not in text
+    assert "h3_profile_common.sh" in text
+    assert "ComfyUI-Spectrum-MiniMax-H3" in text
+    assert "ComfyUI-MiniMaxH3-FirstBlockCache" in text
