@@ -3,14 +3,14 @@ import json
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = [
-    "scripts/h3_profile_common.sh",
+PROFILE_SCRIPTS = [
     "scripts/setupp_h3_comfui_turbo.sh",
     "scripts/setupp_h3_comfui_cache.sh",
     "scripts/setupp_h3_comfui_pdd.sh",
     "scripts/setupp_h3_comfui_vdn.sh",
     "scripts/setupp_h3_comfui_fasth3.sh",
 ]
+SCRIPTS = ["scripts/h3_profile_common.sh", *PROFILE_SCRIPTS]
 
 
 def test_h3_profile_scripts_are_flat_and_parse():
@@ -36,6 +36,14 @@ def test_deployment_profile_registry_points_to_real_scripts():
         ids.add(profile["id"])
         assert profile["id"] != "legacy-fast"
         assert (ROOT / profile["script"]).is_file(), profile["script"]
+
+
+def test_profile_scripts_can_load_common_helper_before_branch_merge():
+    for rel in PROFILE_SCRIPTS:
+        text = (ROOT / rel).read_text()
+        assert "H3_PROFILE_COMMON_URL" in text, rel
+        assert "vast_setup_script/main/scripts/h3_profile_common.sh" in text, rel
+        assert "vast_setup_script/refactor-h3-deploy-scripts/scripts/h3_profile_common.sh" in text, rel
 
 
 def test_cache_profile_owns_cache_implementation():
