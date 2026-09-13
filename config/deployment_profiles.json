@@ -13,7 +13,7 @@
       "display_name": "H3 Turbo",
       "script": "scripts/setupp_h3_comfui_turbo.sh",
       "status": "stable",
-      "notes": "LightX2V 4/8-step LoRAs on native ComfyUI H3 nodes."
+      "notes": "LightX2V FL2VA 4-step v1.2 by default; optional 8-step/Ref2VA LoRAs on ComfyUI core H3 nodes."
     },
     {
       "id": "pdd",

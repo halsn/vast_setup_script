@@ -13,9 +13,10 @@ class ReadinessError(RuntimeError):
 
 NODE_FOR_FEATURE = {
     "h3": "ComfyUI-H3-Worker",
-    "turbo": "ComfyUI-MiniMax-H3-Turbo",
     "pdd": "ComfyUI-MiniMax-H3-PDD-Acc",
 }
+MANAGED_FEATURES = {"h3", "turbo", "pdd"}
+TURBO_LORA = "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors"
 PDD_FILES = (
     "MiniMax-H3-FL2VA-Acc-8Step.safetensors",
     "MiniMax-H3-Ref2VA-Acc-8Step.safetensors",
@@ -57,7 +58,7 @@ def build_ready_payload(
         missing_features = sorted(
             feature
             for feature in template_features
-            if feature in NODE_FOR_FEATURE and feature not in features
+            if feature in MANAGED_FEATURES and feature not in features
         )
         missing_nodes = [
             NODE_FOR_FEATURE[feature]
@@ -160,14 +161,16 @@ def _enabled_features(runtime: Mapping[str, Any], custom_nodes: Path) -> List[st
                 if (
                     isinstance(feature, str)
                     and feature.strip()
-                    and feature.strip() not in {"h3", "turbo", "pdd"}
+                    and feature.strip() not in MANAGED_FEATURES
                     and feature.strip() not in values
                 ):
                     values.append(feature.strip())
 
     if (custom_nodes / NODE_FOR_FEATURE["h3"]).is_dir():
         values.insert(0, "h3")
-    if (custom_nodes / NODE_FOR_FEATURE["turbo"]).is_dir():
+
+    turbo_path = custom_nodes.parent / "models" / "loras" / TURBO_LORA
+    if turbo_path.is_file():
         values.append("turbo")
 
     pdd_node = custom_nodes / NODE_FOR_FEATURE["pdd"]

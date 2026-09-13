@@ -17,7 +17,7 @@ AUDIO_MODEL = "minimax_h3_audio_vae_fp32.safetensors"
 TEXT_MODEL = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 FL2VA_MODEL = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 REF2VA_MODEL = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
-TURBO_LORA = "minimax_h3_turbo_v4_step600_ema.safetensors"
+TURBO_LORA = "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors"
 PDD_FL2VA = "MiniMax-H3-FL2VA-Acc-8Step.safetensors"
 PDD_REF2VA = "MiniMax-H3-Ref2VA-Acc-8Step.safetensors"
 
@@ -142,21 +142,30 @@ def _base_graph(
         sigma_id = "pdd_apply"
         sigma_output = 1
     else:
-        workflow["sampler_select"] = _node("KSamplerSelect", sampler_name="res_multistep")
-        steps = 4 if acceleration == "turbo" else 20
+        is_turbo = acceleration == "turbo"
+        workflow["sampler_select"] = _node(
+            "KSamplerSelect", sampler_name="euler" if is_turbo else "res_multistep"
+        )
+        steps = 4 if is_turbo else 20
         model_id = "unet"
         sampler_id = "sampler_select"
-        if acceleration == "turbo":
+        if is_turbo:
+            # LightX2V Turbo uses ComfyUI core nodes only: apply the converted
+            # LoRA, set the H3 video/audio sigma shifts, then sample with
+            # Euler + Simple for four NFEs.
             workflow["turbo_lora"] = _node(
-                "MiniMaxH3TurboLoRA",
+                "LoraLoaderModelOnly",
                 model=_connection("unet"),
                 lora_name=TURBO_LORA,
-                strength=1.0,
-                low_vram=bool(gpu_memory_mib is not None and gpu_memory_mib < 24_000),
+                strength_model=1.0,
             )
-            workflow["turbo_sampler"] = _node("MiniMaxH3TurboSampler")
-            model_id = "turbo_lora"
-            sampler_id = "turbo_sampler"
+            workflow["turbo_shift"] = _node(
+                "MiniMaxH3SigmaShift",
+                model=_connection("turbo_lora"),
+                shift_video=6.0,
+                shift_audio=3.0,
+            )
+            model_id = "turbo_shift"
         workflow["scheduler"] = _node(
             "BasicScheduler",
             model=_connection(model_id),
