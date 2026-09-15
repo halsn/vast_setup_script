@@ -22,6 +22,9 @@ REFINE_REQUIRED_FREE_GB="${REFINE_REQUIRED_FREE_GB:-3}"
 NODE_NAME="Comfyui_Minimax_h3_latent_Upscaler"
 NODE_REPO="https://github.com/xmarre/Comfyui_Minimax_h3_latent_Upscaler-Plus.git"
 NODE_REV="620165a311de9b28a36260219fb5cd370a304e3c"
+MPI_NODE_NAME="ComfyUi-MpiNodes"
+MPI_NODE_REPO="https://github.com/MadPonyInteractive/ComfyUi-MpiNodes.git"
+MPI_NODE_REV="1de35a33827b125fe2adbc08df23266c465c032a"
 REFINE_MODEL_REPO="LBH-123-AI/Minimax_h3_latent_Upscaler"
 REFINE_MODEL_NAME="minimax_h3_latent_upscaler_3d_fp16.safetensors"
 REFINE_MODEL_SHA256="043e5a48e161610ef6c3ea974645220354d06fa618abca15f76d084812eb55c2"
@@ -68,6 +71,55 @@ install_pinned_refine_node() {
   [[ "$actual_rev" == "$NODE_REV" ]] \
     || { h3_profile_error "Refine custom node revision mismatch: $actual_rev"; return 1; }
   h3_profile_install_requirements "$node_dir"
+}
+
+install_pinned_mpi_nodes() {
+  local node_dir="$COMFY_DIR/custom_nodes/$MPI_NODE_NAME"
+  mkdir -p "$(dirname "$node_dir")"
+  if [[ -e "$node_dir" && ! -d "$node_dir/.git" ]]; then
+    h3_profile_error "Existing MPI node path is not a git checkout: $node_dir"
+    return 1
+  fi
+
+  if [[ ! -d "$node_dir/.git" ]]; then
+    git clone --filter=blob:none "$MPI_NODE_REPO" "$node_dir"
+  fi
+
+  git -C "$node_dir" fetch --force --depth=1 origin "$MPI_NODE_REV"
+  git -C "$node_dir" checkout --detach --force "$MPI_NODE_REV"
+  local actual_rev
+  actual_rev="$(git -C "$node_dir" rev-parse HEAD)"
+  [[ "$actual_rev" == "$MPI_NODE_REV" ]] \
+    || { h3_profile_error "MPI custom node revision mismatch: $actual_rev"; return 1; }
+  h3_profile_install_requirements "$node_dir"
+}
+
+verify_mpi_latent_nodes() {
+  local object_info_url="http://127.0.0.1:${COMFY_PORT}/object_info"
+  "$COMFY_PYTHON" - "$object_info_url" <<'PY'
+import json
+import sys
+import urllib.request
+
+url = sys.argv[1]
+required = ("MpiSaveLatent", "MpiLoadLatent")
+try:
+    with urllib.request.urlopen(url, timeout=20) as response:
+        catalog = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI object catalog: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+missing = [name for name in required if name not in catalog]
+if missing:
+    print(
+        "[ERROR] ComfyUI did not register required MPI latent nodes: " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print("[OK] ComfyUI registered MpiSaveLatent and MpiLoadLatent", file=sys.stderr)
+PY
 }
 
 sha256_file() {
@@ -122,9 +174,11 @@ main_refine() {
   h3_profile_prepare_base
   refine_preflight_disk
   install_pinned_refine_node
+  install_pinned_mpi_nodes
   install_refine_model
   h3_profile_finish
-  h3_profile_info "H3 refine profile ready (pinned 3D latent upscaler + verified FP16 checkpoint)."
+  verify_mpi_latent_nodes
+  h3_profile_info "H3 refine profile ready (pinned 3D latent upscaler + packed AV latent persistence)."
 }
 
 main_refine "$@"
