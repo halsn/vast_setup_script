@@ -6,7 +6,7 @@
       "display_name": "H3 Native",
       "script": "scripts/setupp_h3_comfui.sh",
       "status": "stable",
-      "notes": "Native H3 base with SageAttention and official workflows."
+      "notes": "Native H3 base with SageAttention, official workflows, shared Refine, and packed AV latent persistence."
     },
     {
       "id": "turbo",
@@ -35,13 +35,6 @@
       "script": "scripts/setupp_h3_comfui_cache.sh",
       "status": "stable",
       "notes": "Spectrum or FirstBlockCache, selected with H3_CACHE_METHOD."
-    },
-    {
-      "id": "refine",
-      "display_name": "H3 Refine",
-      "script": "scripts/setupp_h3_comfui_refine.sh",
-      "status": "stable",
-      "notes": "Post-generation H3 refine with pinned 3D latent upscaler plus packed AV latent save/load persistence for independent second-pass enhancement."
     },
     {
       "id": "fasth3",

@@ -20,5 +20,8 @@ jobs:
         run: python -m pytest -q tests
       - name: Check shell syntax
         run: |
+          bash -n scripts/h3_comfui_base.sh
           bash -n scripts/h3_profile_common.sh
-          bash -n scripts/setupp_h3_comfui_refine.sh
+          for script in scripts/setupp_h3_comfui*.sh; do
+            bash -n "$script"
+          done

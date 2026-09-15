@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "vast_comfy_bootstrap.sh"
-BASE_SCRIPT = Path(__file__).parents[1] / "scripts" / "setupp_h3_comfui.sh"
+BASE_SCRIPT = Path(__file__).parents[1] / "scripts" / "h3_comfui_base.sh"
 
 
 class BootstrapContractTests(unittest.TestCase):
