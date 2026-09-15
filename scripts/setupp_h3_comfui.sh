@@ -27,6 +27,22 @@ cleanup_native_profile() {
 trap cleanup_native_profile EXIT
 
 main_native() {
+  case "${1:-}" in
+    -h|--help|--version)
+      h3_profile_load_base
+      main "$@"
+      return
+      ;;
+    "")
+      ;;
+    *)
+      # Preserve the base CLI's validation/error behavior for unknown arguments.
+      h3_profile_load_base
+      main "$@"
+      return
+      ;;
+  esac
+
   h3_profile_prepare_base
   h3_profile_finish
   h3_profile_info "H3 Native profile ready (shared Refine + packed AV latent persistence enabled by default)."
