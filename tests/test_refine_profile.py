@@ -59,6 +59,17 @@ def test_native_is_a_thin_profile_and_every_user_facing_profile_inherits_shared_
     assert "scripts/setupp_h3_comfui.sh" not in common
 
 
+def test_native_wrapper_preserves_base_help_and_version_cli():
+    native = NATIVE_SCRIPT.read_text(encoding="utf-8")
+    dispatch = native[native.index("main_native() {") : native.index('main_native "$@"')]
+
+    assert '-h|--help|--version' in dispatch
+    assert "h3_profile_load_base" in dispatch
+    assert 'main "$@"' in dispatch
+    assert dispatch.index("h3_profile_load_base") < dispatch.index('main "$@"')
+    assert dispatch.index('main "$@"') < dispatch.index("h3_profile_prepare_base")
+
+
 def test_refine_is_not_a_separate_deployment_profile():
     registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
 
