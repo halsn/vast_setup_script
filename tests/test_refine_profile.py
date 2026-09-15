@@ -1,7 +1,9 @@
 from pathlib import Path
+import json
 
 
 SCRIPT = Path("scripts/setupp_h3_comfui_refine.sh")
+REGISTRY = Path("config/deployment_profiles.json")
 
 
 def test_refine_profile_is_discoverable_and_pins_runtime_assets():
@@ -24,3 +26,28 @@ def test_refine_profile_preflights_disk_and_verifies_checksum():
     assert 'REFINE_REQUIRED_FREE_GB="${REFINE_REQUIRED_FREE_GB:-3}"' in text
     assert "sha256" in text.lower()
     assert "latent_upscale_models" in text
+
+
+def test_refine_profile_pins_and_verifies_mpi_latent_persistence_nodes():
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "https://github.com/MadPonyInteractive/ComfyUi-MpiNodes.git" in text
+    assert "1de35a33827b125fe2adbc08df23266c465c032a" in text
+    assert "install_pinned_mpi_nodes" in text
+    assert "verify_mpi_latent_nodes" in text
+    assert '"MpiSaveLatent"' in text
+    assert '"MpiLoadLatent"' in text
+
+    main = text[text.index("main_refine() {") : text.index('main_refine "$@"')]
+    assert main.index("install_pinned_mpi_nodes") < main.index("h3_profile_finish")
+    assert main.index("h3_profile_finish") < main.index("verify_mpi_latent_nodes")
+
+
+def test_refine_profile_is_registered_for_discovery_and_documents_latent_persistence():
+    registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    refine = next((profile for profile in registry["profiles"] if profile["id"] == "refine"), None)
+
+    assert refine is not None
+    assert refine["script"] == "scripts/setupp_h3_comfui_refine.sh"
+    assert refine["status"] == "stable"
+    assert "latent" in refine["notes"].lower()

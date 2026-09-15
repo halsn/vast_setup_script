@@ -37,6 +37,13 @@
       "notes": "Spectrum or FirstBlockCache, selected with H3_CACHE_METHOD."
     },
     {
+      "id": "refine",
+      "display_name": "H3 Refine",
+      "script": "scripts/setupp_h3_comfui_refine.sh",
+      "status": "stable",
+      "notes": "Post-generation H3 refine with pinned 3D latent upscaler plus packed AV latent save/load persistence for independent second-pass enhancement."
+    },
+    {
       "id": "fasth3",
       "display_name": "H3 FastH3 VSA",
       "script": "scripts/setupp_h3_comfui_fasth3.sh",
