@@ -8,6 +8,9 @@ if [[ -n "${H3_PROFILE_SCRIPT_SOURCE:-}" ]]; then
   H3_PROFILE_SCRIPT_DIR="$(cd "$(dirname "$H3_PROFILE_SCRIPT_SOURCE")" 2>/dev/null && pwd -P || true)"
 fi
 H3_PROFILE_BASE_TMP=""
+VHS_NODE_NAME="ComfyUI-VideoHelperSuite"
+VHS_NODE_REPO="https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
+VHS_NODE_REV="4d907bee61e92c2e65af3bd6383a4e4d356126d1"
 
 h3_profile_info() { printf '[INFO] %s\n' "$*" >&2; }
 h3_profile_warn() { printf '[WARN] %s\n' "$*" >&2; }
@@ -49,6 +52,7 @@ h3_profile_load_base() {
 h3_profile_prepare_base() {
   h3_profile_load_base
   main
+  h3_profile_install_video_helper_suite
 }
 
 h3_profile_install_requirements() {
@@ -61,6 +65,35 @@ h3_profile_install_node() {
   local name="$1" repo="$2"
   install_or_update_node "$name" "$repo"
   h3_profile_install_requirements "$COMFY_DIR/custom_nodes/$name"
+}
+
+h3_profile_install_video_helper_suite() {
+  local node_dir="$COMFY_DIR/custom_nodes/$VHS_NODE_NAME" actual_rev
+  mkdir -p "$COMFY_DIR/custom_nodes"
+  if [[ -e "$node_dir" && ! -d "$node_dir/.git" ]]; then
+    h3_profile_error "Existing VideoHelperSuite path is not a git checkout: $node_dir"
+    return 1
+  fi
+  if [[ ! -d "$node_dir/.git" ]]; then
+    git clone --filter=blob:none "$VHS_NODE_REPO" "$node_dir"
+  fi
+  git -C "$node_dir" fetch --force --depth=1 origin "$VHS_NODE_REV"
+  git -C "$node_dir" checkout --detach --force "$VHS_NODE_REV"
+  actual_rev="$(git -C "$node_dir" rev-parse HEAD)"
+  [[ "$actual_rev" == "$VHS_NODE_REV" ]] \
+    || { h3_profile_error "VideoHelperSuite revision mismatch: $actual_rev"; return 1; }
+  h3_profile_install_requirements "$node_dir"
+  h3_profile_info "VideoHelperSuite pinned media preview backend installed."
+}
+
+h3_profile_verify_media_preview_routes() {
+  local base_url="http://127.0.0.1:${COMFY_PORT}" route status
+  for route in /vhs/viewvideo /vhs/viewaudio; do
+    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${base_url}${route}" || true)"
+    [[ "$status" == "204" ]] \
+      || { h3_profile_error "ComfyUI media preview route $route is unavailable (HTTP ${status:-none})."; return 1; }
+  done
+  h3_profile_info "Browser-compatible video/audio preview routes are ready."
 }
 
 h3_profile_ensure_hf() {
@@ -111,4 +144,5 @@ h3_profile_finish() {
   patch_h3_workflow_model_names || true
   restart_comfyui
   run_health_checks
+  h3_profile_verify_media_preview_routes
 }
