@@ -1,7 +1,9 @@
 from pathlib import Path
+import json
 
 
 SCRIPT = Path("scripts/setupp_h3_comfui_refine.sh")
+REGISTRY = Path("config/deployment_profiles.json")
 
 
 def test_refine_profile_is_discoverable_and_pins_runtime_assets():
@@ -39,3 +41,13 @@ def test_refine_profile_pins_and_verifies_mpi_latent_persistence_nodes():
     main = text[text.index("main_refine() {") : text.index('main_refine "$@"')]
     assert main.index("install_pinned_mpi_nodes") < main.index("h3_profile_finish")
     assert main.index("h3_profile_finish") < main.index("verify_mpi_latent_nodes")
+
+
+def test_refine_profile_is_registered_for_discovery_and_documents_latent_persistence():
+    registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    refine = next((profile for profile in registry["profiles"] if profile["id"] == "refine"), None)
+
+    assert refine is not None
+    assert refine["script"] == "scripts/setupp_h3_comfui_refine.sh"
+    assert refine["status"] == "stable"
+    assert "latent" in refine["notes"].lower()
