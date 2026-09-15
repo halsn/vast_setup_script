@@ -35,5 +35,7 @@ def test_refine_profile_pins_and_verifies_mpi_latent_persistence_nodes():
     assert "verify_mpi_latent_nodes" in text
     assert '"MpiSaveLatent"' in text
     assert '"MpiLoadLatent"' in text
-    assert text.index("install_pinned_mpi_nodes") < text.index("h3_profile_finish")
-    assert text.index("h3_profile_finish") < text.index("verify_mpi_latent_nodes")
+
+    main = text[text.index("main_refine() {") : text.index('main_refine "$@"')]
+    assert main.index("install_pinned_mpi_nodes") < main.index("h3_profile_finish")
+    assert main.index("h3_profile_finish") < main.index("verify_mpi_latent_nodes")
