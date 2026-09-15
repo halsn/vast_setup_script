@@ -24,3 +24,16 @@ def test_refine_profile_preflights_disk_and_verifies_checksum():
     assert 'REFINE_REQUIRED_FREE_GB="${REFINE_REQUIRED_FREE_GB:-3}"' in text
     assert "sha256" in text.lower()
     assert "latent_upscale_models" in text
+
+
+def test_refine_profile_pins_and_verifies_mpi_latent_persistence_nodes():
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "https://github.com/MadPonyInteractive/ComfyUi-MpiNodes.git" in text
+    assert "1de35a33827b125fe2adbc08df23266c465c032a" in text
+    assert "install_pinned_mpi_nodes" in text
+    assert "verify_mpi_latent_nodes" in text
+    assert '"MpiSaveLatent"' in text
+    assert '"MpiLoadLatent"' in text
+    assert text.index("install_pinned_mpi_nodes") < text.index("h3_profile_finish")
+    assert text.index("h3_profile_finish") < text.index("verify_mpi_latent_nodes")
