@@ -24,6 +24,7 @@
 | PDD | `scripts/setupp_h3_comfui_pdd.sh` | Alibaba PDD 8-step，支持 FL2VA / Ref2VA |
 | VDN | `scripts/setupp_h3_comfui_vdn.sh` | VDN-H3 hybrid attention，默认 8-step DMD stage |
 | Cache | `scripts/setupp_h3_comfui_cache.sh` | Spectrum / FirstBlockCache |
+| Refine | `scripts/setupp_h3_comfui_refine.sh` | H3 3D latent 二采 + packed AV Latent 保存/加载，用于生成后独立高清增强 |
 | FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | FastVideo VSA + 4-step LoRA，目前以 FL2VA 为主 |
 
 机器可读的 profile 元数据位于 `config/deployment_profiles.json`。`vast_workspace` 仍以应用 profile 为配置源，并实时发现 `scripts/` 下可部署脚本；这里的 JSON 用于脚本侧元数据、文档和校验，不重复实现一套工作台配置逻辑。
@@ -88,6 +89,16 @@ H3_CACHE_METHOD=firstblock bash setupp_h3_comfui_cache.sh
 ```
 
 一次只启用一种 cache 路线。Cache profile 自己安装节点并生成 `H3_Cache_Active.json`，不再依赖旧 `fast` 脚本。
+
+### Refine / 生成后高清增强
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/setupp_h3_comfui_refine.sh | bash
+```
+
+该 profile 在基础 H3 环境上追加固定版本的 3D latent 二采节点与 FP16 checkpoint，同时安装固定版本的 `ComfyUi-MpiNodes`。其中 `MpiSaveLatent` / `MpiLoadLatent` 可以正确保存和恢复 MiniMax H3 的 packed 视频+音频 Latent；部署完成后脚本会重启 ComfyUI，并通过 `/object_info` 强校验这两个节点已经注册成功。
+
+工作台检测到这些能力后，新生成任务会保留一采 packed AV Latent。之后可直接从历史记录启动独立二采高清增强：从保存的 Latent 继续，不重新执行一采 sampler。旧任务如果当时没有保存 Latent，仍可正常查看和重新生成，但不能直接走这条生成后增强链路。
 
 ### FastH3 / VSA
 
