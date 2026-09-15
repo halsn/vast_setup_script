@@ -2,31 +2,34 @@ import unittest
 from pathlib import Path
 
 
-BASE_SCRIPT = Path(__file__).parents[1] / "scripts" / "setupp_h3_comfui.sh"
+COMMON_SCRIPT = Path(__file__).parents[1] / "scripts" / "h3_profile_common.sh"
 
 
 class MediaPreviewProfileTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.text = BASE_SCRIPT.read_text(encoding="utf-8")
+        cls.text = COMMON_SCRIPT.read_text(encoding="utf-8")
 
-    def test_video_helper_suite_is_pinned_and_installed_for_all_h3_profiles(self):
+    def test_video_helper_suite_is_pinned_for_h3_profiles(self):
         self.assertIn('VHS_NODE_NAME="ComfyUI-VideoHelperSuite"', self.text)
         self.assertIn(
             'VHS_NODE_REPO="https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"',
             self.text,
         )
         self.assertIn('VHS_NODE_REV="4d907bee61e92c2e65af3bd6383a4e4d356126d1"', self.text)
-        self.assertIn("install_pinned_video_helper_suite", self.text)
-        install_body = self.text[self.text.index("install_custom_nodes() {"):self.text.index("detect_sageattention() {")]
-        self.assertIn("install_pinned_video_helper_suite", install_body)
+        self.assertIn("h3_profile_install_video_helper_suite", self.text)
+        prepare = self.text[
+            self.text.index("h3_profile_prepare_base() {"):
+            self.text.index("h3_profile_install_requirements() {")
+        ]
+        self.assertIn("h3_profile_install_video_helper_suite", prepare)
 
-    def test_health_checks_require_video_helper_suite_preview_route(self):
-        self.assertIn("verify_media_preview_routes", self.text)
+    def test_finish_requires_video_helper_suite_preview_routes(self):
+        self.assertIn("h3_profile_verify_media_preview_routes", self.text)
         self.assertIn("/vhs/viewvideo", self.text)
         self.assertIn("/vhs/viewaudio", self.text)
-        health = self.text[self.text.index("run_health_checks() {"):self.text.index("print_summary() {")]
-        self.assertIn("verify_media_preview_routes", health)
+        finish = self.text[self.text.index("h3_profile_finish() {"):]
+        self.assertIn("h3_profile_verify_media_preview_routes", finish)
 
 
 if __name__ == "__main__":
