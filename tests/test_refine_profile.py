@@ -2,10 +2,13 @@ from pathlib import Path
 import json
 
 
-BASE_SCRIPT = Path("scripts/setupp_h3_comfui.sh")
+NATIVE_SCRIPT = Path("scripts/setupp_h3_comfui.sh")
+BASE_CORE = Path("scripts/h3_comfui_base.sh")
+COMMON = Path("scripts/h3_profile_common.sh")
 REFINE_SCRIPT = Path("scripts/setupp_h3_comfui_refine.sh")
 REGISTRY = Path("config/deployment_profiles.json")
 PROFILE_SCRIPTS = [
+    NATIVE_SCRIPT,
     Path("scripts/setupp_h3_comfui_cache.sh"),
     Path("scripts/setupp_h3_comfui_fasth3.sh"),
     Path("scripts/setupp_h3_comfui_pdd.sh"),
@@ -14,8 +17,8 @@ PROFILE_SCRIPTS = [
 ]
 
 
-def test_base_h3_installs_refine_and_packed_latent_persistence_by_default():
-    text = BASE_SCRIPT.read_text(encoding="utf-8")
+def test_shared_h3_layer_installs_refine_and_packed_latent_persistence_by_default():
+    text = COMMON.read_text(encoding="utf-8")
 
     assert 'H3_INSTALL_REFINE="${H3_INSTALL_REFINE:-1}"' in text
     assert "https://github.com/xmarre/Comfyui_Minimax_h3_latent_Upscaler-Plus.git" in text
@@ -26,23 +29,34 @@ def test_base_h3_installs_refine_and_packed_latent_persistence_by_default():
     assert "1de35a33827b125fe2adbc08df23266c465c032a" in text
     assert '"MpiSaveLatent"' in text
     assert '"MpiLoadLatent"' in text
+    assert '"MinimaxH3LatentUpscaler3DRefineHandoff"' in text
 
-    main = text[text.index("main() {") : text.index('if [[ "${H3_BOOTSTRAP_LIB_ONLY:-0}"')]
-    assert "install_refine_capability" in main
-    assert "run_health_checks" in main
+    prepare = text[text.index("h3_profile_prepare_base() {") : text.index("h3_profile_install_requirements() {")]
+    assert "h3_profile_install_refine_capability" in prepare
+    finish = text[text.index("h3_profile_finish() {") :]
+    assert "h3_profile_verify_refine_capability" in finish
 
 
 def test_refine_can_only_be_disabled_explicitly():
-    text = BASE_SCRIPT.read_text(encoding="utf-8")
+    text = COMMON.read_text(encoding="utf-8")
 
     assert 'if [[ "${H3_INSTALL_REFINE:-1}" != "1" ]]' in text
     assert "Refine capability disabled by H3_INSTALL_REFINE=0" in text
 
 
-def test_every_acceleration_profile_inherits_base_refine_capability():
+def test_native_is_a_thin_profile_and_every_user_facing_profile_inherits_shared_capabilities():
+    assert BASE_CORE.exists(), "internal H3 base core must be separated from user-facing deployment scripts"
+    native = NATIVE_SCRIPT.read_text(encoding="utf-8")
+    assert "h3_profile_prepare_base" in native
+    assert "h3_profile_finish" in native
+
     for script in PROFILE_SCRIPTS:
         text = script.read_text(encoding="utf-8")
-        assert "h3_profile_prepare_base" in text, f"{script.name} must execute the H3 base bootstrap"
+        assert "h3_profile_prepare_base" in text, f"{script.name} must execute the shared H3 capability layer"
+
+    common = COMMON.read_text(encoding="utf-8")
+    assert "scripts/h3_comfui_base.sh" in common
+    assert "scripts/setupp_h3_comfui.sh" not in common
 
 
 def test_refine_is_not_a_separate_deployment_profile():
