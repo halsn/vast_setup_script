@@ -36,6 +36,13 @@ def test_fasth3_defaults_to_official_8step_v2_comfy_assets_and_templates():
     assert 'Comfy-Org/workflow_templates' in text
 
 
+def test_fasth3_reference_workflows_are_pinned_to_the_verified_upstream_revision():
+    text = FASTH3.read_text(encoding="utf-8")
+
+    assert "90c71fb78b3726392d010ff62a8e79e92d7296ad" in text
+    assert "workflow_templates/main/templates" not in text
+
+
 def test_fasth3_v2_requires_current_comfy_core_and_sparse_attention_nodes():
     text = FASTH3.read_text(encoding="utf-8")
 
