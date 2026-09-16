@@ -123,6 +123,10 @@ H3_FASTH3_VARIANT=v2_8step bash setupp_h3_comfui_fasth3.sh
 
 该路线使用 `FastVideo/FastVideo-FastH3-Comfy` 的 `fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors`。工作台 direct-Comfy graph 按官方 V2 recipe 使用 `MiniMaxH3SigmaShift(10/3) → ModelAttentionBackend(comfy kitchen attention) → BlockSparseAttention(VSA, keep 10%) → 8-step res_multistep`。
 
+FastH3 checkpoint 也固定到不可变的 Hugging Face revision `567165f0412203f6629b98982f82a154bd7474a0`。目标文件大小为 `22,128,378,696` bytes（约 20.61 GiB），SHA-256 为 `0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8`。部署会先校验已存在的同名文件；哈希不匹配时删除旧文件并从固定 revision 重新下载，新文件只有在 size 与 SHA-256 都通过后才会进入正式模型目录。
+
+为了避免 Hugging Face 全局 cache 再保留一份约 20.61 GiB 的完整 checkpoint，FastH3 使用 `ComfyUI/models/.h3_fasth3_download` 做同文件系统 staging，通过 `local_dir` 直接下载，校验后用原子 rename 移入 `models/diffusion_models`。没有有效旧文件时，下载前会检查至少“模型实际大小 + 2 GiB”可用空间。
+
 脚本要求 **ComfyUI >= 0.35.0**。如果实例已经是 0.35.0 或更高版本，保持现有 core 不降级；如果低于 0.35.0，则默认固定切换到已验证的 `v0.35.0`，而不是追随 ComfyUI `master`。可通过 `H3_FASTH3_V2_COMFYUI_REF` 显式覆盖该 ref。
 
 部署时安装的 Comfy-Org FastH3 T2V / I2V reference workflow 也固定到已核对的 `workflow_templates` commit `90c71fb78b3726392d010ff62a8e79e92d7296ad`，避免后续上游 `main` 变化导致同一 profile 产生不同模板。
