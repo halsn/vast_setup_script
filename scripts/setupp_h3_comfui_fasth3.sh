@@ -27,6 +27,7 @@ H3_FASTH3_V2_REPO="${H3_FASTH3_V2_REPO:-FastVideo/FastVideo-FastH3-Comfy}"
 H3_FASTH3_V2_MODEL="${H3_FASTH3_V2_MODEL:-diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors}"
 H3_FASTH3_V2_REV="${H3_FASTH3_V2_REV:-567165f0412203f6629b98982f82a154bd7474a0}"
 H3_FASTH3_V2_SHA256="${H3_FASTH3_V2_SHA256:-0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8}"
+H3_FASTH3_V2_SIZE_BYTES="${H3_FASTH3_V2_SIZE_BYTES:-22128378696}"
 H3_FASTH3_V2_MIN_COMFYUI_VERSION="${H3_FASTH3_V2_MIN_COMFYUI_VERSION:-0.35.0}"
 H3_FASTH3_V2_COMFYUI_REF="${H3_FASTH3_V2_COMFYUI_REF:-v0.35.0}"
 H3_FASTH3_WORKFLOW_BASE_URL="${H3_FASTH3_WORKFLOW_BASE_URL:-https://raw.githubusercontent.com/Comfy-Org/workflow_templates/90c71fb78b3726392d010ff62a8e79e92d7296ad/templates}"
@@ -106,6 +107,7 @@ install_fasth3_v2_model() {
     "$H3_FASTH3_V2_MODEL" \
     "$H3_FASTH3_V2_REV" \
     "$H3_FASTH3_V2_SHA256" \
+    "$H3_FASTH3_V2_SIZE_BYTES" \
     "$target_dir" <<'PY'
 import hashlib
 import os
@@ -114,9 +116,12 @@ import sys
 
 from huggingface_hub import hf_hub_download
 
-repo, filename, revision, expected_sha256, target_dir = sys.argv[1:]
+repo, filename, revision, expected_sha256, expected_size, target_dir = sys.argv[1:]
+expected_size = int(expected_size)
 os.makedirs(target_dir, exist_ok=True)
 dst = os.path.join(target_dir, os.path.basename(filename))
+models_root = os.path.dirname(target_dir)
+staging_root = os.path.join(models_root, ".h3_fasth3_download")
 
 
 def sha256_file(path):
@@ -139,20 +144,40 @@ if os.path.isfile(dst):
     )
     os.remove(dst)
 
-src = hf_hub_download(repo_id=repo, filename=filename, revision=revision)
-tmp = dst + ".part"
+# Keep the large download on the ComfyUI models filesystem so the Hub cache
+# does not retain a second ~20.6 GiB copy. Reserve 2 GiB for metadata/temp I/O.
+required_free = expected_size + 2 * 1024**3
+available_free = shutil.disk_usage(models_root).free
+if available_free < required_free:
+    raise SystemExit(
+        "FastH3 V2 checkpoint needs at least "
+        f"{required_free} bytes free on {models_root}; only {available_free} bytes are available."
+    )
+
+shutil.rmtree(staging_root, ignore_errors=True)
+os.makedirs(staging_root, exist_ok=True)
 try:
-    shutil.copy2(src, tmp)
-    actual = sha256_file(tmp)
+    src = hf_hub_download(
+        repo_id=repo,
+        filename=filename,
+        revision=revision,
+        local_dir=staging_root,
+    )
+    actual_size = os.path.getsize(src)
+    if actual_size != expected_size:
+        raise SystemExit(
+            "Downloaded FastH3 V2 checkpoint size mismatch: "
+            f"expected {expected_size}, got {actual_size}"
+        )
+    actual = sha256_file(src)
     if actual != expected_sha256:
         raise SystemExit(
             "Downloaded FastH3 V2 checkpoint failed SHA-256 verification: "
             f"expected {expected_sha256}, got {actual}"
         )
-    os.replace(tmp, dst)
+    os.replace(src, dst)
 finally:
-    if os.path.exists(tmp):
-        os.remove(tmp)
+    shutil.rmtree(staging_root, ignore_errors=True)
 
 print(f"[OK] installed and verified pinned FastH3 model: {dst} @ {revision}")
 PY
