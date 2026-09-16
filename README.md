@@ -123,7 +123,11 @@ H3_FASTH3_VARIANT=v2_8step bash setupp_h3_comfui_fasth3.sh
 
 该路线使用 `FastVideo/FastVideo-FastH3-Comfy` 的 `fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors`。工作台 direct-Comfy graph 按官方 V2 recipe 使用 `MiniMaxH3SigmaShift(10/3) → ModelAttentionBackend(comfy kitchen attention) → BlockSparseAttention(VSA, keep 10%) → 8-step res_multistep`。
 
-脚本要求 **ComfyUI >= 0.35.0**，部署完成后会通过 `/object_info` 同时确认：
+脚本要求 **ComfyUI >= 0.35.0**。如果实例已经是 0.35.0 或更高版本，保持现有 core 不降级；如果低于 0.35.0，则默认固定切换到已验证的 `v0.35.0`，而不是追随 ComfyUI `master`。可通过 `H3_FASTH3_V2_COMFYUI_REF` 显式覆盖该 ref。
+
+部署时安装的 Comfy-Org FastH3 T2V / I2V reference workflow 也固定到已核对的 `workflow_templates` commit `90c71fb78b3726392d010ff62a8e79e92d7296ad`，避免后续上游 `main` 变化导致同一 profile 产生不同模板。
+
+部署完成后会通过 `/object_info` 同时确认：
 
 - checkpoint 已被 `UNETLoader` 识别；
 - `MiniMaxH3SigmaShift` 已注册；
