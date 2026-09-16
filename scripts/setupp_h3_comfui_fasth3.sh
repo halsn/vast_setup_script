@@ -25,8 +25,13 @@ source "$COMMON"
 H3_FASTH3_VARIANT="${H3_FASTH3_VARIANT:-v2_8step}"
 H3_FASTH3_V2_REPO="${H3_FASTH3_V2_REPO:-FastVideo/FastVideo-FastH3-Comfy}"
 H3_FASTH3_V2_MODEL="${H3_FASTH3_V2_MODEL:-diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors}"
-H3_FASTH3_V2_MIN_COMFYUI_VERSION="${H3_FASTH3_V2_MIN_COMFYUI_VERSION:-0.33.0}"
+H3_FASTH3_V2_MIN_COMFYUI_VERSION="${H3_FASTH3_V2_MIN_COMFYUI_VERSION:-0.35.0}"
 H3_FASTH3_WORKFLOW_BASE_URL="${H3_FASTH3_WORKFLOW_BASE_URL:-https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates}"
+
+# Workbench policy: expose official FastH3 V2 as T2VA first. The Comfy-Org
+# FL2VA/I2V template is still installed for inspection, but stays out of the
+# direct workbench engine until real GPU validation confirms the distilled
+# checkpoint behaves correctly for image-conditioned generation.
 
 # Legacy FastH3 4-step preview compatibility mode.
 H3_FASTH3_NODE_REPO="${H3_FASTH3_NODE_REPO:-https://github.com/barelymining/ComfyUI-MiniMax-H3-FastVideo.git}"
@@ -54,10 +59,10 @@ ensure_fasth3_v2_comfyui_version() {
   fi
 
   if [[ "${H3_SKIP_UPGRADE:-0}" == "1" ]]; then
-    die "ComfyUI ${current:-unknown} is below $H3_FASTH3_V2_MIN_COMFYUI_VERSION; official FastH3 V2 workflows require a newer ComfyUI core."
+    die "ComfyUI ${current:-unknown} is below $H3_FASTH3_V2_MIN_COMFYUI_VERSION; official FastH3 V2 VSA-H3 inference requires a newer ComfyUI core."
   fi
 
-  log_warn "FastH3 8-Step V2 requires ComfyUI >= $H3_FASTH3_V2_MIN_COMFYUI_VERSION; updating ${current:-unknown}."
+  log_warn "FastH3 8-Step V2 requires ComfyUI >= $H3_FASTH3_V2_MIN_COMFYUI_VERSION for native BlockSparseAttention; updating ${current:-unknown}."
   stop_comfyui
   update_git_checkout "$COMFY_DIR" "ComfyUI"
   H3_COMFYUI_CORE_UPDATED=1
@@ -114,7 +119,8 @@ install_fasth3_v2() {
     "video_fastvideo_fasth3_i2v.json" \
     "H3_FastH3_8Step_V2_I2V.json"
 
-  h3_profile_info "FastH3 8-Step V2 installed: official DMD2 checkpoint, shifts 10/3, eight transformer forwards."
+  h3_profile_info "FastH3 8-Step V2 installed: official DMD2 checkpoint plus Comfy-Org reference templates."
+  h3_profile_info "Workbench FastH3 stays T2VA-only until FL2VA completes real GPU validation."
 }
 
 install_vsa_runtime() {
@@ -171,7 +177,7 @@ install_fasth3_preview4() {
   h3_profile_warn "Using legacy FastH3 preview4 compatibility mode (community VSA wrapper, FL2VA-oriented)."
 }
 
-verify_fasth3_v2_model() {
+verify_fasth3_v2_readiness() {
   [[ "$H3_FASTH3_VARIANT" == "v2_8step" ]] || return 0
   local filename="${H3_FASTH3_V2_MODEL##*/}"
   local object_info_url="http://127.0.0.1:${COMFY_PORT}/object_info"
@@ -203,7 +209,50 @@ collect(catalog.get("UNETLoader", {}))
 if filename not in visible:
     print(f"[ERROR] FastH3 V2 model is not visible to UNETLoader: {filename}", file=sys.stderr)
     raise SystemExit(1)
+
+required_nodes = (
+    "MiniMaxH3SigmaShift",
+    "ModelAttentionBackend",
+    "BlockSparseAttention",
+)
+missing = [name for name in required_nodes if not catalog.get(name)]
+if missing:
+    print(f"[ERROR] FastH3 V2 required ComfyUI nodes are missing: {', '.join(missing)}", file=sys.stderr)
+    raise SystemExit(1)
+
+sparse_visible = set()
+collect_target = sparse_visible
+def collect_sparse(value):
+    if isinstance(value, str):
+        collect_target.add(value)
+    elif isinstance(value, list):
+        for item in value:
+            collect_sparse(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            collect_sparse(item)
+collect_sparse(catalog["BlockSparseAttention"])
+if "vsa" not in sparse_visible:
+    print("[ERROR] BlockSparseAttention does not expose the VSA selection required by FastH3 V2.", file=sys.stderr)
+    raise SystemExit(1)
+
+attention_visible = set()
+def collect_attention(value):
+    if isinstance(value, str):
+        attention_visible.add(value)
+    elif isinstance(value, list):
+        for item in value:
+            collect_attention(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            collect_attention(item)
+collect_attention(catalog["ModelAttentionBackend"])
+if "comfy kitchen attention" not in attention_visible:
+    print("[ERROR] ModelAttentionBackend does not expose comfy kitchen attention required by FastH3 V2.", file=sys.stderr)
+    raise SystemExit(1)
+
 print(f"[OK] FastH3 V2 model registered: {filename}", file=sys.stderr)
+print("[OK] FastH3 V2 VSA-H3 runtime nodes registered.", file=sys.stderr)
 PY
 }
 
@@ -217,10 +266,10 @@ main_fasth3() {
   esac
 
   h3_profile_finish
-  verify_fasth3_v2_model
+  verify_fasth3_v2_readiness
 
   if [[ "$H3_FASTH3_VARIANT" == "v2_8step" ]]; then
-    log_ok "H3 FastH3 profile ready: official FastH3 8-Step V2 (T2V/I2V workflows installed)."
+    log_ok "H3 FastH3 profile ready: official FastH3 8-Step V2 with VSA-H3 runtime verified; workbench mode is T2VA."
   else
     log_ok "H3 FastH3 profile ready: legacy preview4 community VSA compatibility mode."
   fi
