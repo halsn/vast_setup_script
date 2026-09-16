@@ -34,14 +34,14 @@
       "display_name": "H3 Cache",
       "script": "scripts/setupp_h3_comfui_cache.sh",
       "status": "stable",
-      "notes": "Spectrum or FirstBlockCache, selected with H3_CACHE_METHOD."
+      "notes": "Pinned Spectrum v0.2.27 or FirstBlockCache with safe/fast/aggressive/experimental presets, selected with H3_CACHE_METHOD."
     },
     {
       "id": "fasth3",
-      "display_name": "H3 FastH3 VSA",
+      "display_name": "H3 FastH3",
       "script": "scripts/setupp_h3_comfui_fasth3.sh",
       "status": "preview",
-      "notes": "FastVideo VSA + 4-step LoRA; currently FL2VA only."
+      "notes": "Official FastH3 8-Step V2 Comfy checkpoint and workflows by default; legacy community 4-step VSA remains available with H3_FASTH3_VARIANT=preview4."
     }
   ]
 }
