@@ -27,7 +27,7 @@
 | PDD | `scripts/setupp_h3_comfui_pdd.sh` | Alibaba PDD 8-step，支持 FL2VA / Ref2VA |
 | VDN | `scripts/setupp_h3_comfui_vdn.sh` | VDN-H3 hybrid attention，默认 8-step DMD stage |
 | Cache | `scripts/setupp_h3_comfui_cache.sh` | Spectrum v0.2.27 / FirstBlockCache（含 Experimental deep-reuse） |
-| FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | 官方 FastH3 8-Step V2；可选旧 4-step VSA compatibility mode |
+| FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | 官方 FastH3 8-Step V2 + VSA-H3；工作台当前仅开放 T2VA |
 
 机器可读的 profile 元数据位于 `config/deployment_profiles.json`。`vast_workspace` 仍以应用 profile 为配置源，并实时发现 `scripts/` 下以 `setupp_h3_comfui` 开头的用户可选部署脚本；内部 `h3_comfui_base.sh` 不会进入部署列表。
 
@@ -109,7 +109,7 @@ safe | fast | aggressive | experimental
 
 ### FastH3
 
-默认安装 FastVideo 官方 **FastH3 8-Step V2** 的 ComfyUI INT8 ConvRot checkpoint，并安装官方 T2V / I2V workflow：
+默认安装 FastVideo 官方 **FastH3 8-Step V2** 的 ComfyUI INT8 ConvRot checkpoint，并保留官方 T2V / I2V reference workflow：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/setupp_h3_comfui_fasth3.sh | bash
@@ -121,7 +121,16 @@ curl -fsSL https://raw.githubusercontent.com/halsn/vast_setup_script/main/script
 H3_FASTH3_VARIANT=v2_8step bash setupp_h3_comfui_fasth3.sh
 ```
 
-该路线使用 `FastVideo/FastVideo-FastH3-Comfy` 的 `fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors`；官方 recipe 为 8 次 transformer forward、video/audio sigma shift 10/3。脚本要求 ComfyUI >= 0.33.0，并在部署完成后确认 checkpoint 已被 `UNETLoader` 识别。
+该路线使用 `FastVideo/FastVideo-FastH3-Comfy` 的 `fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors`。工作台 direct-Comfy graph 按官方 V2 recipe 使用 `MiniMaxH3SigmaShift(10/3) → ModelAttentionBackend(comfy kitchen attention) → BlockSparseAttention(VSA, keep 10%) → 8-step res_multistep`。
+
+脚本要求 **ComfyUI >= 0.35.0**，部署完成后会通过 `/object_info` 同时确认：
+
+- checkpoint 已被 `UNETLoader` 识别；
+- `MiniMaxH3SigmaShift` 已注册；
+- `ModelAttentionBackend` 已注册并暴露 `comfy kitchen attention`；
+- `BlockSparseAttention` 已注册并暴露 `vsa`。
+
+工作台当前只开放 **T2VA 文生视频**。官方 I2V/FL2VA reference workflow 仍会安装，便于后续验证，但在完成真实 GPU validation 前不会作为 FastH3 工作台模式开放。
 
 原来的社区 4-step VSA 路线没有删除，需要兼容旧实例或旧 workflow 时可以显式选择：
 
