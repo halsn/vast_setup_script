@@ -36,6 +36,24 @@ def test_fasth3_defaults_to_official_8step_v2_comfy_assets_and_templates():
     assert 'Comfy-Org/workflow_templates' in text
 
 
+def test_fasth3_v2_requires_current_comfy_core_and_sparse_attention_nodes():
+    text = FASTH3.read_text(encoding="utf-8")
+
+    assert 'H3_FASTH3_V2_MIN_COMFYUI_VERSION="${H3_FASTH3_V2_MIN_COMFYUI_VERSION:-0.35.0}"' in text
+    assert "MiniMaxH3SigmaShift" in text
+    assert "ModelAttentionBackend" in text
+    assert "BlockSparseAttention" in text
+    assert "verify_fasth3_v2_readiness" in text
+
+
+def test_fasth3_workbench_scope_is_explicitly_t2va_until_fl2va_gpu_validation():
+    text = FASTH3.read_text(encoding="utf-8")
+
+    assert "T2VA" in text
+    assert "FL2VA" in text
+    assert "GPU validation" in text
+
+
 def test_fasth3_keeps_legacy_4step_preview_as_explicit_compatibility_mode():
     text = FASTH3.read_text(encoding="utf-8")
 
