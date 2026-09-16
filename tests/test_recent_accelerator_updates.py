@@ -55,6 +55,17 @@ def test_fasth3_model_file_is_sha256_verified_before_reuse_and_after_download():
     assert "Downloaded FastH3 V2 checkpoint failed SHA-256 verification" in text
 
 
+def test_fasth3_model_download_uses_local_staging_and_checks_real_disk_requirement():
+    text = FASTH3.read_text(encoding="utf-8")
+
+    assert 'H3_FASTH3_V2_SIZE_BYTES="${H3_FASTH3_V2_SIZE_BYTES:-22128378696}"' in text
+    assert "shutil.disk_usage" in text
+    assert "local_dir=staging_root" in text
+    assert ".h3_fasth3_download" in text
+    assert "shutil.copy2(src, tmp)" not in text
+    assert "FastH3 V2 checkpoint needs" in text
+
+
 def test_fasth3_reference_workflows_are_pinned_to_the_verified_upstream_revision():
     text = FASTH3.read_text(encoding="utf-8")
 
