@@ -25,6 +25,7 @@ source "$COMMON"
 H3_FASTH3_VARIANT="${H3_FASTH3_VARIANT:-v2_8step}"
 H3_FASTH3_V2_REPO="${H3_FASTH3_V2_REPO:-FastVideo/FastVideo-FastH3-Comfy}"
 H3_FASTH3_V2_MODEL="${H3_FASTH3_V2_MODEL:-diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors}"
+H3_FASTH3_V2_REV="${H3_FASTH3_V2_REV:-567165f0412203f6629b98982f82a154bd7474a0}"
 H3_FASTH3_V2_MIN_COMFYUI_VERSION="${H3_FASTH3_V2_MIN_COMFYUI_VERSION:-0.35.0}"
 H3_FASTH3_V2_COMFYUI_REF="${H3_FASTH3_V2_COMFYUI_REF:-v0.35.0}"
 H3_FASTH3_WORKFLOW_BASE_URL="${H3_FASTH3_WORKFLOW_BASE_URL:-https://raw.githubusercontent.com/Comfy-Org/workflow_templates/90c71fb78b3726392d010ff62a8e79e92d7296ad/templates}"
@@ -95,6 +96,35 @@ ensure_fasth3_v2_comfyui_version() {
   log_ok "FastH3 8-Step V2 ComfyUI requirement satisfied after update: $current"
 }
 
+install_fasth3_v2_model() {
+  local target_dir="$COMFY_DIR/models/diffusion_models"
+  mkdir -p "$target_dir"
+  h3_profile_ensure_hf
+  "$COMFY_PYTHON" - \
+    "$H3_FASTH3_V2_REPO" \
+    "$H3_FASTH3_V2_MODEL" \
+    "$H3_FASTH3_V2_REV" \
+    "$target_dir" <<'PY'
+import os
+import shutil
+import sys
+
+from huggingface_hub import hf_hub_download
+
+repo, filename, revision, target_dir = sys.argv[1:]
+os.makedirs(target_dir, exist_ok=True)
+dst = os.path.join(target_dir, os.path.basename(filename))
+if os.path.isfile(dst) and os.path.getsize(dst) > 0:
+    print(f"[OK] already present: {dst}")
+    raise SystemExit(0)
+src = hf_hub_download(repo_id=repo, filename=filename, revision=revision)
+tmp = dst + ".part"
+shutil.copy2(src, tmp)
+os.replace(tmp, dst)
+print(f"[OK] installed pinned FastH3 model: {dst} @ {revision}")
+PY
+}
+
 install_official_fasth3_workflow() {
   local source_name="$1" target_name="$2"
   local workflow_dir="$COMFY_DIR/custom_nodes/ComfyUI-H3-Worker/example_workflows"
@@ -126,10 +156,7 @@ PY
 
 install_fasth3_v2() {
   ensure_fasth3_v2_comfyui_version
-  h3_profile_hf_file \
-    "$H3_FASTH3_V2_REPO" \
-    "$H3_FASTH3_V2_MODEL" \
-    "$COMFY_DIR/models/diffusion_models"
+  install_fasth3_v2_model
 
   install_official_fasth3_workflow \
     "video_fastvideo_fasth3_t2v.json" \
