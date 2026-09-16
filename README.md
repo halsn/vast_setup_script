@@ -26,8 +26,8 @@
 | Turbo | `scripts/setupp_h3_comfui_turbo.sh` | LightX2V 4/8-step LoRA，原生 ComfyUI H3 节点 |
 | PDD | `scripts/setupp_h3_comfui_pdd.sh` | Alibaba PDD 8-step，支持 FL2VA / Ref2VA |
 | VDN | `scripts/setupp_h3_comfui_vdn.sh` | VDN-H3 hybrid attention，默认 8-step DMD stage |
-| Cache | `scripts/setupp_h3_comfui_cache.sh` | Spectrum / FirstBlockCache |
-| FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | FastVideo VSA + 4-step LoRA，目前以 FL2VA 为主 |
+| Cache | `scripts/setupp_h3_comfui_cache.sh` | Spectrum v0.2.27 / FirstBlockCache（含 Experimental deep-reuse） |
+| FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | 官方 FastH3 8-Step V2；可选旧 4-step VSA compatibility mode |
 
 机器可读的 profile 元数据位于 `config/deployment_profiles.json`。`vast_workspace` 仍以应用 profile 为配置源，并实时发现 `scripts/` 下以 `setupp_h3_comfui` 开头的用户可选部署脚本；内部 `h3_comfui_base.sh` 不会进入部署列表。
 
@@ -41,16 +41,18 @@ Native 现在也是一个薄 profile：它与其它加速 profile 一样经过�
 
 ### Turbo
 
-默认安装 LightX2V FL2VA 4-step 和 8-step LoRA：
+默认安装 LightX2V FL2VA 4-step v1.2；8-step 与 Ref2VA 可按需启用：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/setupp_h3_comfui_turbo.sh | bash
 ```
 
-可选安装 Ref2VA：
+可选安装 8-step / Ref2VA：
 
 ```bash
-H3_TURBO_INSTALL_REF2VA_4=1 H3_TURBO_INSTALL_REF2VA_8=1 \
+H3_TURBO_INSTALL_FL2VA_8=1 \
+H3_TURBO_INSTALL_REF2VA_4=1 \
+H3_TURBO_INSTALL_REF2VA_8=1 \
   bash setupp_h3_comfui_turbo.sh
 ```
 
@@ -80,27 +82,54 @@ VDN 的 8-step DMD adapter 不应再叠加社区 Turbo LoRA。
 
 ### Cache
 
+Cache 依赖现在固定到已验证的上游版本，避免新实例因为上游 HEAD 漂移而得到不同结果：
+
+- Spectrum：`v0.2.27`（commit `120d72e...`），默认 workflow 使用 `system_ram` forecast 路径，降低 forecast 阶段的 VRAM 压力；
+- FirstBlockCache：固定到加入 Experimental deep-reuse 的 commit `f7a2712...`。
+
 Spectrum：
 
 ```bash
 H3_CACHE_METHOD=spectrum bash setupp_h3_comfui_cache.sh
 ```
 
-FirstBlockCache：
+FirstBlockCache 默认使用 `fast`：
 
 ```bash
-H3_CACHE_METHOD=firstblock bash setupp_h3_comfui_cache.sh
+H3_CACHE_METHOD=firstblock H3_CACHE_PRESET=fast bash setupp_h3_comfui_cache.sh
 ```
 
-一次只启用一种 cache 路线。Cache profile 自己安装节点并生成 `H3_Cache_Active.json`，不再依赖旧 `fast` 脚本。
+可选 preset：
 
-### FastH3 / VSA
+```text
+safe | fast | aggressive | experimental
+```
+
+`experimental` 对应上游 `H3 Experimental` deep-reuse 模式，属于显式 opt-in，不作为默认值。Cache profile 会生成 `H3_Cache_Active.json`，一次只启用 Spectrum 或 FirstBlockCache 其中一条路线。
+
+### FastH3
+
+默认安装 FastVideo 官方 **FastH3 8-Step V2** 的 ComfyUI INT8 ConvRot checkpoint，并安装官方 T2V / I2V workflow：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/setupp_h3_comfui_fasth3.sh | bash
 ```
 
-该 profile 会安装 FastVideo VSA 节点、4-step LoRA 和 gate。当前以 FL2VA 为主；VSA 是 attention 加速，不负责降低 activation VRAM。
+默认等价于：
+
+```bash
+H3_FASTH3_VARIANT=v2_8step bash setupp_h3_comfui_fasth3.sh
+```
+
+该路线使用 `FastVideo/FastVideo-FastH3-Comfy` 的 `fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors`；官方 recipe 为 8 次 transformer forward、video/audio sigma shift 10/3。脚本要求 ComfyUI >= 0.33.0，并在部署完成后确认 checkpoint 已被 `UNETLoader` 识别。
+
+原来的社区 4-step VSA 路线没有删除，需要兼容旧实例或旧 workflow 时可以显式选择：
+
+```bash
+H3_FASTH3_VARIANT=preview4 bash setupp_h3_comfui_fasth3.sh
+```
+
+`preview4` 仍安装 `barelymining/ComfyUI-MiniMax-H3-FastVideo`、`fasth3_vsa_4-steps-v5.safetensors` 和 `fasth3_vsa_gate.safetensors`。FastH3 deployment profile 继续保持 `preview` 状态，直到完成真实 GPU smoke test。
 
 ## 共享 Refine / 生成后高清增强
 
