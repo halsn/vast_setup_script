@@ -1,0 +1,29 @@
+name: resolve-hf-revision
+
+on:
+  push:
+    branches:
+      - update/h3-accelerators-20260916
+    paths:
+      - .github/workflows/resolve-hf-revision.yml
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve FastH3 short revision
+        shell: python
+        run: |
+          import json
+          import urllib.request
+
+          url = "https://huggingface.co/api/models/FastVideo/FastVideo-FastH3-Comfy/revision/567165f"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              data = json.load(response)
+          sha = data.get("sha", "")
+          if len(sha) != 40:
+              raise SystemExit(f"Unexpected resolved sha: {sha!r}")
+          print(f"FASTH3_FULL_REV={sha}")
