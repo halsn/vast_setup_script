@@ -26,6 +26,7 @@ H3_FASTH3_VARIANT="${H3_FASTH3_VARIANT:-v2_8step}"
 H3_FASTH3_V2_REPO="${H3_FASTH3_V2_REPO:-FastVideo/FastVideo-FastH3-Comfy}"
 H3_FASTH3_V2_MODEL="${H3_FASTH3_V2_MODEL:-diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors}"
 H3_FASTH3_V2_REV="${H3_FASTH3_V2_REV:-567165f0412203f6629b98982f82a154bd7474a0}"
+H3_FASTH3_V2_SHA256="${H3_FASTH3_V2_SHA256:-0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8}"
 H3_FASTH3_V2_MIN_COMFYUI_VERSION="${H3_FASTH3_V2_MIN_COMFYUI_VERSION:-0.35.0}"
 H3_FASTH3_V2_COMFYUI_REF="${H3_FASTH3_V2_COMFYUI_REF:-v0.35.0}"
 H3_FASTH3_WORKFLOW_BASE_URL="${H3_FASTH3_WORKFLOW_BASE_URL:-https://raw.githubusercontent.com/Comfy-Org/workflow_templates/90c71fb78b3726392d010ff62a8e79e92d7296ad/templates}"
@@ -104,24 +105,56 @@ install_fasth3_v2_model() {
     "$H3_FASTH3_V2_REPO" \
     "$H3_FASTH3_V2_MODEL" \
     "$H3_FASTH3_V2_REV" \
+    "$H3_FASTH3_V2_SHA256" \
     "$target_dir" <<'PY'
+import hashlib
 import os
 import shutil
 import sys
 
 from huggingface_hub import hf_hub_download
 
-repo, filename, revision, target_dir = sys.argv[1:]
+repo, filename, revision, expected_sha256, target_dir = sys.argv[1:]
 os.makedirs(target_dir, exist_ok=True)
 dst = os.path.join(target_dir, os.path.basename(filename))
-if os.path.isfile(dst) and os.path.getsize(dst) > 0:
-    print(f"[OK] already present: {dst}")
-    raise SystemExit(0)
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+if os.path.isfile(dst):
+    actual = sha256_file(dst)
+    if actual == expected_sha256:
+        print(f"[OK] verified existing FastH3 V2 checkpoint SHA-256: {dst}")
+        raise SystemExit(0)
+    print(
+        f"[WARN] FastH3 V2 checkpoint SHA-256 mismatch; removing invalid file: {dst} "
+        f"(expected {expected_sha256}, got {actual})",
+        file=sys.stderr,
+    )
+    os.remove(dst)
+
 src = hf_hub_download(repo_id=repo, filename=filename, revision=revision)
 tmp = dst + ".part"
-shutil.copy2(src, tmp)
-os.replace(tmp, dst)
-print(f"[OK] installed pinned FastH3 model: {dst} @ {revision}")
+try:
+    shutil.copy2(src, tmp)
+    actual = sha256_file(tmp)
+    if actual != expected_sha256:
+        raise SystemExit(
+            "Downloaded FastH3 V2 checkpoint failed SHA-256 verification: "
+            f"expected {expected_sha256}, got {actual}"
+        )
+    os.replace(tmp, dst)
+finally:
+    if os.path.exists(tmp):
+        os.remove(tmp)
+
+print(f"[OK] installed and verified pinned FastH3 model: {dst} @ {revision}")
 PY
 }
 
