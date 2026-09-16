@@ -21,11 +21,14 @@ fi
 source "$COMMON"
 
 H3_CACHE_METHOD="${H3_CACHE_METHOD:-spectrum}"
+H3_CACHE_PRESET="${H3_CACHE_PRESET:-fast}"
 H3_CACHE_WORKFLOW_REQUIRED="${H3_CACHE_WORKFLOW_REQUIRED:-1}"
 H3_CACHE_SPECTRUM_REPO="${H3_CACHE_SPECTRUM_REPO:-https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3.git}"
+H3_CACHE_SPECTRUM_REV="${H3_CACHE_SPECTRUM_REV:-120d72e2f48b781235b34149e39bbdf0f1317d82}"
 H3_CACHE_FIRSTBLOCK_REPO="${H3_CACHE_FIRSTBLOCK_REPO:-https://github.com/duckyshell/ComfyUI-MiniMaxH3-FirstBlockCache.git}"
+H3_CACHE_FIRSTBLOCK_REV="${H3_CACHE_FIRSTBLOCK_REV:-f7a27128e73e1859f2295e64698164203799029d}"
 
-validate_cache_method() {
+validate_cache_configuration() {
   case "$H3_CACHE_METHOD" in
     spectrum|firstblock) ;;
     *)
@@ -33,17 +36,49 @@ validate_cache_method() {
       return 2
       ;;
   esac
+
+  if [[ "$H3_CACHE_METHOD" == "firstblock" ]]; then
+    case "$H3_CACHE_PRESET" in
+      safe|fast|aggressive|experimental) ;;
+      *)
+        h3_profile_error "H3_CACHE_PRESET must be safe, fast, aggressive, or experimental (got '$H3_CACHE_PRESET')"
+        return 2
+        ;;
+    esac
+  fi
+}
+
+install_cache_node_pinned() {
+  local name="$1" repo="$2" revision="$3"
+  local node_dir="$COMFY_DIR/custom_nodes/$name" actual_rev
+  mkdir -p "$COMFY_DIR/custom_nodes"
+
+  if [[ -e "$node_dir" && ! -d "$node_dir/.git" ]]; then
+    h3_profile_error "Existing cache node path is not a git checkout: $node_dir"
+    return 1
+  fi
+  if [[ ! -d "$node_dir/.git" ]]; then
+    git clone --filter=blob:none "$repo" "$node_dir"
+  fi
+
+  git -C "$node_dir" fetch --force --depth=1 origin "$revision"
+  git -C "$node_dir" checkout --detach --force "$revision"
+  actual_rev="$(git -C "$node_dir" rev-parse HEAD)"
+  [[ "$actual_rev" == "$revision" ]] \
+    || { h3_profile_error "$name revision mismatch: $actual_rev"; return 1; }
+  h3_profile_install_requirements "$node_dir"
+  h3_profile_info "$name pinned at $revision"
 }
 
 write_cache_workflow() {
-  local template="$1" target="$2" method="$3"
-  "$COMFY_PYTHON" - "$template" "$target" "$method" <<'PY'
+  local template="$1" target="$2" method="$3" preset="$4"
+  "$COMFY_PYTHON" - "$template" "$target" "$method" "$preset" <<'PY'
 import json
 import os
 import sys
 import tempfile
 
-template, target, method = sys.argv[1:]
+template, target, method, preset = sys.argv[1:]
 with open(template, encoding="utf-8") as handle:
     workflow = json.load(handle)
 
@@ -63,17 +98,25 @@ model_links = [
 if not model_links:
     raise SystemExit("official H3 workflow has no model links to patch")
 
+firstblock_modes = {
+    "safe": "H3 Safe — 0.08 / max 2",
+    "fast": "H3 Fast — 0.10 / max 2",
+    "aggressive": "H3 Aggressive — 0.12 / max 2",
+    "experimental": "H3 Experimental",
+}
 configs = {
     "spectrum": {
         "class_type": "SpectrumApplyMiniMaxH3",
-        "title": "H3 Cache - Spectrum",
+        "title": "H3 Cache - Spectrum v0.2.27",
+        # v0.2.27 supports keeping forecast hidden state in system RAM and
+        # streaming the FinalLayer through bounded CUDA workspaces.
         "widgets_values": [True, 0.50, 1, 0.10, 2.0, 0.75, 1, 1, 8, False, "system_ram", True],
         "repo": "https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3",
     },
     "firstblock": {
         "class_type": "ApplyMiniMaxH3FirstBlockCache",
-        "title": "H3 Cache - FirstBlockCache",
-        "widgets_values": ["H3 Cache — 0.10 / max 2", 0.10, 0.10, 0.95, 2, False],
+        "title": f"H3 Cache - FirstBlockCache ({preset})",
+        "widgets_values": [firstblock_modes[preset], 0.10, 0.10, 0.95, 2, False],
         "repo": "https://github.com/duckyshell/ComfyUI-MiniMaxH3-FirstBlockCache",
     },
 }
@@ -156,6 +199,7 @@ state["lastLinkId"] = next_link_id - 1
 workflow["last_node_id"] = max(int(workflow.get("last_node_id", 0)), node_id)
 workflow["last_link_id"] = max(int(workflow.get("last_link_id", 0)), next_link_id - 1)
 workflow.setdefault("extra", {})["h3_cache_method"] = method
+workflow["extra"]["h3_cache_preset"] = preset if method == "firstblock" else "spectrum-v0.2.27"
 workflow["extra"]["h3_cache_repo"] = config["repo"]
 
 directory = os.path.dirname(os.path.abspath(target))
@@ -183,26 +227,36 @@ generate_cache_workflow() {
     return 0
   fi
 
-  write_cache_workflow "$base" "$target" "$H3_CACHE_METHOD"
-  log_ok "Generated H3_Cache_Active.json ($H3_CACHE_METHOD)."
+  write_cache_workflow "$base" "$target" "$H3_CACHE_METHOD" "$H3_CACHE_PRESET"
+  log_ok "Generated H3_Cache_Active.json ($H3_CACHE_METHOD${H3_CACHE_METHOD:+, preset=$H3_CACHE_PRESET})."
 }
 
 main_cache() {
-  validate_cache_method
+  validate_cache_configuration
   h3_profile_prepare_base
 
   case "$H3_CACHE_METHOD" in
     spectrum)
-      h3_profile_install_node "ComfyUI-Spectrum-MiniMax-H3" "$H3_CACHE_SPECTRUM_REPO"
+      install_cache_node_pinned \
+        "ComfyUI-Spectrum-MiniMax-H3" \
+        "$H3_CACHE_SPECTRUM_REPO" \
+        "$H3_CACHE_SPECTRUM_REV"
       ;;
     firstblock)
-      h3_profile_install_node "ComfyUI-MiniMaxH3-FirstBlockCache" "$H3_CACHE_FIRSTBLOCK_REPO"
+      install_cache_node_pinned \
+        "ComfyUI-MiniMaxH3-FirstBlockCache" \
+        "$H3_CACHE_FIRSTBLOCK_REPO" \
+        "$H3_CACHE_FIRSTBLOCK_REV"
       ;;
   esac
 
   generate_cache_workflow
   h3_profile_finish
-  log_ok "H3 Cache profile ready: $H3_CACHE_METHOD"
+  if [[ "$H3_CACHE_METHOD" == "firstblock" ]]; then
+    log_ok "H3 Cache profile ready: firstblock ($H3_CACHE_PRESET)"
+  else
+    log_ok "H3 Cache profile ready: Spectrum v0.2.27 (system-RAM forecast path)"
+  fi
 }
 
 main_cache "$@"
