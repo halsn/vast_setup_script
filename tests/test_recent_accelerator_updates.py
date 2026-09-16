@@ -45,6 +45,16 @@ def test_fasth3_model_download_is_pinned_to_the_verified_hugging_face_revision()
     assert '"$H3_FASTH3_V2_REV"' in text
 
 
+def test_fasth3_model_file_is_sha256_verified_before_reuse_and_after_download():
+    text = FASTH3.read_text(encoding="utf-8")
+
+    assert 'H3_FASTH3_V2_SHA256="${H3_FASTH3_V2_SHA256:-0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8}"' in text
+    assert "hashlib.sha256" in text
+    assert "FastH3 V2 checkpoint SHA-256 mismatch" in text
+    assert "os.remove(dst)" in text
+    assert "Downloaded FastH3 V2 checkpoint failed SHA-256 verification" in text
+
+
 def test_fasth3_reference_workflows_are_pinned_to_the_verified_upstream_revision():
     text = FASTH3.read_text(encoding="utf-8")
 
