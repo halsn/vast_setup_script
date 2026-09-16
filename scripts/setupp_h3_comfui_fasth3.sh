@@ -26,6 +26,7 @@ H3_FASTH3_VARIANT="${H3_FASTH3_VARIANT:-v2_8step}"
 H3_FASTH3_V2_REPO="${H3_FASTH3_V2_REPO:-FastVideo/FastVideo-FastH3-Comfy}"
 H3_FASTH3_V2_MODEL="${H3_FASTH3_V2_MODEL:-diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors}"
 H3_FASTH3_V2_MIN_COMFYUI_VERSION="${H3_FASTH3_V2_MIN_COMFYUI_VERSION:-0.35.0}"
+H3_FASTH3_V2_COMFYUI_REF="${H3_FASTH3_V2_COMFYUI_REF:-v0.35.0}"
 H3_FASTH3_WORKFLOW_BASE_URL="${H3_FASTH3_WORKFLOW_BASE_URL:-https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates}"
 
 # Workbench policy: expose official FastH3 V2 as T2VA first. The Comfy-Org
@@ -50,6 +51,24 @@ validate_fasth3_variant() {
   esac
 }
 
+checkout_fasth3_v2_comfyui_ref() {
+  [[ -d "$COMFY_DIR/.git" ]] || die "ComfyUI at $COMFY_DIR is not a Git checkout; cannot install pinned FastH3 V2 core."
+
+  local stamp
+  git -C "$COMFY_DIR" fetch origin --tags --prune
+  if [[ -n "$(git -C "$COMFY_DIR" status --porcelain)" ]]; then
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    git -C "$COMFY_DIR" stash push -u -m "before-fasth3-v2-core-$stamp"
+    log_warn "ComfyUI local changes were stashed as before-fasth3-v2-core-$stamp"
+  fi
+
+  if ! git -C "$COMFY_DIR" rev-parse --verify "${H3_FASTH3_V2_COMFYUI_REF}^{commit}" >/dev/null 2>&1; then
+    git -C "$COMFY_DIR" fetch origin "$H3_FASTH3_V2_COMFYUI_REF"
+  fi
+  git -C "$COMFY_DIR" checkout --detach "$H3_FASTH3_V2_COMFYUI_REF"
+  log_ok "ComfyUI pinned to verified FastH3 core ref: $H3_FASTH3_V2_COMFYUI_REF"
+}
+
 ensure_fasth3_v2_comfyui_version() {
   local current
   current="$(get_comfyui_version 2>/dev/null || true)"
@@ -62,9 +81,9 @@ ensure_fasth3_v2_comfyui_version() {
     die "ComfyUI ${current:-unknown} is below $H3_FASTH3_V2_MIN_COMFYUI_VERSION; official FastH3 V2 VSA-H3 inference requires a newer ComfyUI core."
   fi
 
-  log_warn "FastH3 8-Step V2 requires ComfyUI >= $H3_FASTH3_V2_MIN_COMFYUI_VERSION for native BlockSparseAttention; updating ${current:-unknown}."
+  log_warn "FastH3 8-Step V2 requires ComfyUI >= $H3_FASTH3_V2_MIN_COMFYUI_VERSION for native BlockSparseAttention; upgrading ${current:-unknown} to verified ref $H3_FASTH3_V2_COMFYUI_REF."
   stop_comfyui
-  update_git_checkout "$COMFY_DIR" "ComfyUI"
+  checkout_fasth3_v2_comfyui_ref
   H3_COMFYUI_CORE_UPDATED=1
   update_python_dependencies
   ensure_comfyui_version
