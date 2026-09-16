@@ -46,6 +46,14 @@ def test_fasth3_v2_requires_current_comfy_core_and_sparse_attention_nodes():
     assert "verify_fasth3_v2_readiness" in text
 
 
+def test_fasth3_v2_upgrades_old_comfyui_to_a_pinned_verified_core():
+    text = FASTH3.read_text(encoding="utf-8")
+
+    assert 'H3_FASTH3_V2_COMFYUI_REF="${H3_FASTH3_V2_COMFYUI_REF:-v0.35.0}"' in text
+    assert 'git -C "$COMFY_DIR" checkout --detach "$H3_FASTH3_V2_COMFYUI_REF"' in text
+    assert 'update_git_checkout "$COMFY_DIR" "ComfyUI"' not in text
+
+
 def test_fasth3_workbench_scope_is_explicitly_t2va_until_fl2va_gpu_validation():
     text = FASTH3.read_text(encoding="utf-8")
 
