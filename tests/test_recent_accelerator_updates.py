@@ -4,7 +4,6 @@ import json
 
 CACHE = Path("scripts/setupp_h3_comfui_cache.sh")
 FASTH3 = Path("scripts/setupp_h3_comfui_fasth3.sh")
-COMMON = Path("scripts/h3_profile_common.sh")
 REGISTRY = Path("config/deployment_profiles.json")
 
 
@@ -39,12 +38,11 @@ def test_fasth3_defaults_to_official_8step_v2_comfy_assets_and_templates():
 
 def test_fasth3_model_download_is_pinned_to_the_verified_hugging_face_revision():
     text = FASTH3.read_text(encoding="utf-8")
-    common = COMMON.read_text(encoding="utf-8")
 
     assert 'H3_FASTH3_V2_REV="${H3_FASTH3_V2_REV:-567165f0412203f6629b98982f82a154bd7474a0}"' in text
+    assert "install_fasth3_v2_model" in text
+    assert "revision=revision" in text
     assert '"$H3_FASTH3_V2_REV"' in text
-    assert 'local revision="${4:-}"' in common
-    assert 'revision=revision or None' in common
 
 
 def test_fasth3_reference_workflows_are_pinned_to_the_verified_upstream_revision():
