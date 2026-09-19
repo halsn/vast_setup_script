@@ -28,6 +28,7 @@
 | VDN | `scripts/setupp_h3_comfui_vdn.sh` | VDN-H3 hybrid attention，默认 8-step DMD stage |
 | Cache | `scripts/setupp_h3_comfui_cache.sh` | Spectrum v0.2.27 / FirstBlockCache（含 Experimental deep-reuse） |
 | FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | 官方 FastH3 8-Step V2 + VSA-H3；工作台当前仅开放 T2VA |
+| Open Studio | `scripts/setupp_h3_studio.sh` | 原生 H3 + AntaresAlice/h3-webui 开源 Studio，面向非 ComfyUI 工作流用户 |
 
 机器可读的 profile 元数据位于 `config/deployment_profiles.json`。`vast_workspace` 仍以应用 profile 为配置源，并实时发现 `scripts/` 下以 `setupp_h3_comfui` 开头的用户可选部署脚本；内部 `h3_comfui_base.sh` 不会进入部署列表。
 
@@ -147,6 +148,37 @@ H3_FASTH3_VARIANT=preview4 bash setupp_h3_comfui_fasth3.sh
 ```
 
 `preview4` 仍安装 `barelymining/ComfyUI-MiniMax-H3-FastVideo`、`fasth3_vsa_4-steps-v5.safetensors` 和 `fasth3_vsa_gate.safetensors`。FastH3 deployment profile 继续保持 `preview` 状态，直到完成真实 GPU smoke test。
+
+## Open Studio
+
+`scripts/setupp_h3_studio.sh` 在 Native H3 共享能力层之上安装
+[AntaresAlice/h3-webui](https://github.com/AntaresAlice/h3-webui) 作为独立产品 UI。
+该上游代码采用 MIT License；部署固定到 commit
+`9a7206e502f876396d3ad8a61fab7cf3152ad5f5`，避免上游更新导致同一 profile 漂移。
+
+Studio 依赖的 T8 H3 双时钟/音频节点固定到
+`T8mars/comfyui-minimax-h3-audio-T8@b92b12f71a4eb0a9288cbbab26a3c05db9a1c433`。
+KJNodes、VideoHelperSuite、H3 模型与 Refine 能力继续由已有 H3 base/common 层维护，
+不会在 Studio profile 内重复下载一套模型。
+
+默认服务：
+
+```text
+ComfyUI      127.0.0.1:<自动探测端口>
+H3 Studio    0.0.0.0:18080
+```
+
+Studio 由 Supervisor 托管，环境变量把它指向同一 ComfyUI 的 input/output 目录。
+部署结束会同时验证 Studio 首页以及 `/api/comfyui/status`，只有 Studio 能实际访问
+ComfyUI 时脚本才成功返回。
+
+可覆盖：
+
+```bash
+H3_STUDIO_PORT=18080 \
+H3_STUDIO_DIR=/workspace/h3-webui \
+  bash scripts/setupp_h3_studio.sh
+```
 
 ## 共享 Refine / 生成后高清增强
 
