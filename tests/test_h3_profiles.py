@@ -10,7 +10,8 @@ PROFILE_SCRIPTS = [
     "scripts/setupp_h3_comfui_vdn.sh",
     "scripts/setupp_h3_comfui_fasth3.sh",
 ]
-SCRIPTS = ["scripts/h3_profile_common.sh", *PROFILE_SCRIPTS]
+STUDIO_SCRIPT = "scripts/setupp_h3_studio.sh"
+SCRIPTS = ["scripts/h3_profile_common.sh", *PROFILE_SCRIPTS, STUDIO_SCRIPT]
 
 
 def test_h3_profile_scripts_are_flat_and_parse():
@@ -52,3 +53,13 @@ def test_cache_profile_owns_cache_implementation():
     assert "h3_profile_common.sh" in text
     assert "ComfyUI-Spectrum-MiniMax-H3" in text
     assert "ComfyUI-MiniMaxH3-FirstBlockCache" in text
+
+
+def test_open_source_studio_profile_is_pinned_and_health_checked():
+    text = (ROOT / STUDIO_SCRIPT).read_text()
+    assert "AntaresAlice/h3-webui.git" in text
+    assert "9a7206e502f876396d3ad8a61fab7cf3152ad5f5" in text
+    assert "T8mars/comfyui-minimax-h3-audio-T8.git" in text
+    assert "b92b12f71a4eb0a9288cbbab26a3c05db9a1c433" in text
+    assert 'H3_STUDIO_PORT="${H3_STUDIO_PORT:-18080}"' in text
+    assert "/api/comfyui/status" in text
