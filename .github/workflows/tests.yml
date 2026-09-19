@@ -22,6 +22,6 @@ jobs:
         run: |
           bash -n scripts/h3_comfui_base.sh
           bash -n scripts/h3_profile_common.sh
-          for script in scripts/setupp_h3_comfui*.sh; do
+          for script in scripts/setupp_h3_comfui*.sh scripts/setupp_h3_studio.sh; do
             bash -n "$script"
           done
