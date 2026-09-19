@@ -25,6 +25,9 @@ H3_STUDIO_SERVICE_NAME="${H3_STUDIO_SERVICE_NAME:-h3-studio}"
 H3_STUDIO_DIR="${H3_STUDIO_DIR:-}"
 H3_STUDIO_SUPERVISOR_CONFIG="${H3_STUDIO_SUPERVISOR_CONFIG:-/etc/supervisor/conf.d/h3-studio.conf}"
 
+KJ_NODE_NAME="ComfyUI-KJNodes"
+KJ_NODE_REPO="https://github.com/kijai/ComfyUI-KJNodes.git"
+KJ_NODE_REV="d3cfe21625e5170126ce06fbfcfe1d88108688c3"
 T8_NODE_NAME="comfyui-minimax-h3-audio-T8"
 T8_NODE_REPO="https://github.com/T8mars/comfyui-minimax-h3-audio-T8.git"
 T8_NODE_REV="b92b12f71a4eb0a9288cbbab26a3c05db9a1c433"
@@ -54,11 +57,18 @@ h3_studio_install_pinned_checkout() {
 }
 
 h3_studio_install_runtime_nodes() {
-  local target="$COMFY_DIR/custom_nodes/$T8_NODE_NAME"
+  local kj_target="$COMFY_DIR/custom_nodes/$KJ_NODE_NAME"
+  local t8_target="$COMFY_DIR/custom_nodes/$T8_NODE_NAME"
   mkdir -p "$COMFY_DIR/custom_nodes"
-  h3_studio_install_pinned_checkout "$T8_NODE_NAME" "$T8_NODE_REPO" "$T8_NODE_REV" "$target"
-  h3_profile_install_requirements "$target"
-  h3_profile_info "Pinned T8 H3 audio/dual-clock nodes installed for the open-source Studio."
+
+  # The Studio enables MiniMaxChunkFeedForward/MiniMaxLowVRAMAttention by
+  # default, so pin KJNodes to a revision known to expose those nodes.
+  h3_studio_install_pinned_checkout "$KJ_NODE_NAME" "$KJ_NODE_REPO" "$KJ_NODE_REV" "$kj_target"
+  h3_profile_install_requirements "$kj_target"
+
+  h3_studio_install_pinned_checkout "$T8_NODE_NAME" "$T8_NODE_REPO" "$T8_NODE_REV" "$t8_target"
+  h3_profile_install_requirements "$t8_target"
+  h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
 }
 
 h3_studio_install_webui() {
@@ -144,6 +154,9 @@ PY
 }
 
 main_studio() {
+  [[ "$H3_STUDIO_PORT" =~ ^[0-9]+$ ]] && (( H3_STUDIO_PORT >= 1 && H3_STUDIO_PORT <= 65535 )) \
+    || { h3_profile_error "H3_STUDIO_PORT must be an integer from 1 to 65535."; return 1; }
+
   case "${1:-}" in
     -h|--help|--version)
       h3_profile_load_base
