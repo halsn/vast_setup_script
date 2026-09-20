@@ -67,7 +67,12 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "309b626973d049b073e93557ff94603efc2d1272" in text
     assert "MiniMaxH3全功能合一完全体导演台工作流" in text
     assert 'TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"' in text
+    assert 'TIMELINE_UNET_NAME="minimax_h3_ref2va_pruned_int8_convrot.safetensors"' in text
+    assert 'TIMELINE_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"' in text
+    assert 'TIMELINE_DEFAULT_STEPS="20"' in text
     assert 'cp -f "$source_template" "$alias_template"' in text
+    assert "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors" in text
+    assert 'named["steps"] = steps' in text
     assert "MiniMaxH3TimelinePlanner" in text
     assert "MiniMaxH3FiniteSegmentSampler" in text
     assert "MiniMaxH3TimelineSelfLiftSampler" in text
