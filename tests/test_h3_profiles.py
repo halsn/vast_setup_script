@@ -67,7 +67,13 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "309b626973d049b073e93557ff94603efc2d1272" in text
     assert "MiniMaxH3全功能合一完全体导演台工作流" in text
     assert 'TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"' in text
-    assert 'cp -f "$source_template" "$alias_template"' in text
+    assert 'TIMELINE_MODEL_REPO="MATLOWAI/minimax-h3-fused-turbo-int8-convrot"' in text
+    assert 'TIMELINE_MODEL_REV="3b51096a1bf67608d98131116558202208fcf195"' in text
+    assert 'TIMELINE_MODEL_SIZE_BYTES="20980178976"' in text
+    assert 'TIMELINE_MODEL_SHA256="4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b"' in text
+    assert ".h3_timeline_download" in text
+    assert "hf_hub_download" in text
+    assert "TIMELINE_SOURCE_CLIP_NAME" in text
     assert "MiniMaxH3TimelinePlanner" in text
     assert "MiniMaxH3FiniteSegmentSampler" in text
     assert "MiniMaxH3TimelineSelfLiftSampler" in text
