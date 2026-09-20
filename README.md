@@ -165,7 +165,9 @@ commit `309b626973d049b073e93557ff94603efc2d1272`，提供多素材时间线、
 有限分段 latent 直续、Soft AV、Drift-Control、长视频拼接以及两阶段 SelfLift 采样。
 该插件采用 GPL-3.0；本仓库不复制其源码，只在目标实例中从上游仓库按固定 revision 安装。
 其推荐的 `MiniMaxH3全功能合一完全体导演台工作流` 会作为 ComfyUI custom-node
-workflow template 自动暴露。
+workflow template 自动暴露。部署时还会复制一个 ASCII 别名
+`h3_timeline_director.json`；ComfyUI 0.34.0 对应的前端 1.49.6 会拒绝 URL
+中的非 ASCII template 标识，所以工作台深链统一使用该别名。
 
 KJNodes、VideoHelperSuite、H3 模型与 Refine/latent-upscaler 能力继续由已有 H3
 base/common 层维护，不会为 Timeline Director 再下载一套基础 H3 模型。
@@ -180,7 +182,7 @@ H3 Studio    0.0.0.0:18080
 Studio 由 Supervisor 托管，环境变量把它指向同一 ComfyUI 的 input/output 目录。
 部署结束会强校验 Timeline Director 的核心节点
 `MiniMaxH3TimelinePlanner`、`MiniMaxH3FiniteSegmentSampler`、
-`MiniMaxH3TimelineSelfLiftSampler`，并确认推荐工作流能通过 ComfyUI
+`MiniMaxH3TimelineSelfLiftSampler`，并确认 ASCII 别名 `h3_timeline_director` 能通过 ComfyUI
 `workflow_templates` API 被 URL 加载；随后再验证 Studio 首页以及
 `/api/comfyui/status`。任一能力不可用时脚本直接失败，不会把半可用实例标记为 ready。
 

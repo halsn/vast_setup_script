@@ -35,7 +35,8 @@ T8_NODE_REV="b92b12f71a4eb0a9288cbbab26a3c05db9a1c433"
 TIMELINE_NODE_NAME="ComfyUI-MiniMaxH3-TimelineDirector"
 TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git"
 TIMELINE_NODE_REV="309b626973d049b073e93557ff94603efc2d1272"
-TIMELINE_TEMPLATE_NAME="MiniMaxH3全功能合一完全体导演台工作流"
+TIMELINE_TEMPLATE_SOURCE_NAME="MiniMaxH3全功能合一完全体导演台工作流"
+TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"
 H3_INSTALL_TIMELINE_DIRECTOR="${H3_INSTALL_TIMELINE_DIRECTOR:-1}"
 
 cleanup_studio_profile() {
@@ -84,9 +85,22 @@ h3_studio_install_timeline_director() {
   fi
 
   local target="$COMFY_DIR/custom_nodes/$TIMELINE_NODE_NAME"
+  local source_template="$target/example_workflows/$TIMELINE_TEMPLATE_SOURCE_NAME.json"
+  local alias_template="$target/example_workflows/$TIMELINE_TEMPLATE_ALIAS.json"
   mkdir -p "$COMFY_DIR/custom_nodes"
-  h3_studio_install_pinned_checkout     "$TIMELINE_NODE_NAME"     "$TIMELINE_NODE_REPO"     "$TIMELINE_NODE_REV"     "$target"
+  h3_studio_install_pinned_checkout \
+    "$TIMELINE_NODE_NAME" \
+    "$TIMELINE_NODE_REPO" \
+    "$TIMELINE_NODE_REV" \
+    "$target"
   h3_profile_install_requirements "$target"
+
+  [[ -f "$source_template" ]] || {
+    h3_profile_error "Timeline Director source template is missing: $source_template"
+    return 1
+  }
+  cp -f "$source_template" "$alias_template"
+  h3_profile_info "Timeline Director URL template alias installed: $TIMELINE_TEMPLATE_ALIAS"
   h3_profile_info "Pinned MiniMax H3 Timeline Director installed at $TIMELINE_NODE_REV."
 }
 
@@ -138,7 +152,12 @@ h3_studio_verify_timeline_director() {
     return 0
   fi
 
-  "$COMFY_PYTHON" -     "http://127.0.0.1:$COMFY_PORT/object_info"     "http://127.0.0.1:$COMFY_PORT/workflow_templates"     "http://127.0.0.1:$COMFY_PORT/api/workflow_templates"     "$TIMELINE_NODE_NAME"     "$TIMELINE_TEMPLATE_NAME" <<'PY'
+  "$COMFY_PYTHON" - \
+    "http://127.0.0.1:$COMFY_PORT/object_info" \
+    "http://127.0.0.1:$COMFY_PORT/workflow_templates" \
+    "http://127.0.0.1:$COMFY_PORT/api/workflow_templates" \
+    "$TIMELINE_NODE_NAME" \
+    "$TIMELINE_TEMPLATE_ALIAS" <<'PY'
 import json
 import sys
 import urllib.parse
