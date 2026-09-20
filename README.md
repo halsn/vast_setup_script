@@ -164,9 +164,18 @@ Studio 依赖的 T8 H3 双时钟/音频节点固定到
 commit `309b626973d049b073e93557ff94603efc2d1272`，提供多素材时间线、
 有限分段 latent 直续、Soft AV、Drift-Control、长视频拼接以及两阶段 SelfLift 采样。
 该插件采用 GPL-3.0；本仓库不复制其源码，只在目标实例中从上游仓库按固定 revision 安装。
+
+推荐工作流默认使用 MATLOWAI fused Turbo INT8 ConvRot checkpoint。本 profile 会从
+`MATLOWAI/minimax-h3-fused-turbo-int8-convrot@3b51096...` 下载并强校验
+`20,980,178,976` bytes 与 SHA-256
+`4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b`。
+下载 staging 放在 ComfyUI models 同一文件系统，不保留 Hugging Face 全局缓存的第二份约 20 GiB 权重。
+模型自身遵循 MiniMax H3 Community License Agreement。
+
 其推荐的 `MiniMaxH3全功能合一完全体导演台工作流` 会作为 ComfyUI custom-node
-workflow template 自动暴露。部署时还会复制一个 ASCII 别名
-`h3_timeline_director.json`；ComfyUI 0.34.0 对应的前端 1.49.6 会拒绝 URL
+workflow template 自动暴露。部署时会生成一个 ASCII 别名
+`h3_timeline_director.json`，同时把上游工作流中的 Windows 子目录式 CLIP 路径
+归一化为本项目实际安装的根目录文件名。ComfyUI 0.34.0 对应的前端 1.49.6 会拒绝 URL
 中的非 ASCII template 标识，所以工作台深链统一使用该别名。
 
 KJNodes、VideoHelperSuite、H3 模型与 Refine/latent-upscaler 能力继续由已有 H3
@@ -180,7 +189,7 @@ H3 Studio    0.0.0.0:18080
 ```
 
 Studio 由 Supervisor 托管，环境变量把它指向同一 ComfyUI 的 input/output 目录。
-部署结束会强校验 Timeline Director 的核心节点
+部署结束会强校验 fused checkpoint 已被 `UNETLoader` 识别、Timeline Director 的核心节点
 `MiniMaxH3TimelinePlanner`、`MiniMaxH3FiniteSegmentSampler`、
 `MiniMaxH3TimelineSelfLiftSampler`，并确认 ASCII 别名 `h3_timeline_director` 能通过 ComfyUI
 `workflow_templates` API 被 URL 加载；随后再验证 Studio 首页以及
