@@ -37,9 +37,21 @@ TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirecto
 TIMELINE_NODE_REV="309b626973d049b073e93557ff94603efc2d1272"
 TIMELINE_TEMPLATE_SOURCE_NAME="MiniMaxH3全功能合一完全体导演台工作流"
 TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"
-TIMELINE_UNET_NAME="minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+TIMELINE_SOURCE_UNET_NAME="minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors"
+TIMELINE_SOURCE_CLIP_NAME='minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
+TIMELINE_NATIVE_UNET_NAME="minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+TIMELINE_NATIVE_STEPS="20"
+TIMELINE_FUSED_MODEL_REPO="MATLOWAI/minimax-h3-fused-turbo-int8-convrot"
+TIMELINE_FUSED_MODEL_REV="3b51096a1bf67608d98131116558202208fcf195"
+TIMELINE_FUSED_MODEL_FILE="diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors"
+TIMELINE_FUSED_MODEL_NAME="${TIMELINE_FUSED_MODEL_FILE##*/}"
+TIMELINE_FUSED_MODEL_SIZE_BYTES="20980178976"
+TIMELINE_FUSED_MODEL_SHA256="4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b"
+TIMELINE_FUSED_STEPS="8"
 TIMELINE_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
-TIMELINE_DEFAULT_STEPS="20"
+H3_TIMELINE_MODEL_VARIANT="${H3_TIMELINE_MODEL_VARIANT:-fused}"
+TIMELINE_UNET_NAME=""
+TIMELINE_DEFAULT_STEPS=""
 H3_INSTALL_TIMELINE_DIRECTOR="${H3_INSTALL_TIMELINE_DIRECTOR:-1}"
 
 cleanup_studio_profile() {
@@ -81,6 +93,24 @@ h3_studio_install_runtime_nodes() {
   h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
 }
 
+h3_studio_configure_timeline_model() {
+  case "$H3_TIMELINE_MODEL_VARIANT" in
+    fused)
+      TIMELINE_UNET_NAME="$TIMELINE_FUSED_MODEL_NAME"
+      TIMELINE_DEFAULT_STEPS="$TIMELINE_FUSED_STEPS"
+      ;;
+    native)
+      TIMELINE_UNET_NAME="$TIMELINE_NATIVE_UNET_NAME"
+      TIMELINE_DEFAULT_STEPS="$TIMELINE_NATIVE_STEPS"
+      ;;
+    *)
+      h3_profile_error "H3_TIMELINE_MODEL_VARIANT must be fused or native."
+      return 1
+      ;;
+  esac
+  h3_profile_info "Timeline Director model variant: $H3_TIMELINE_MODEL_VARIANT ($TIMELINE_UNET_NAME, $TIMELINE_DEFAULT_STEPS steps)."
+}
+
 h3_studio_install_timeline_director() {
   if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" ]]; then
     h3_profile_info "Timeline Director disabled by H3_INSTALL_TIMELINE_DIRECTOR=$H3_INSTALL_TIMELINE_DIRECTOR"
@@ -112,7 +142,8 @@ h3_studio_install_timeline_director() {
     "$alias_template" \
     "$TIMELINE_UNET_NAME" \
     "$TIMELINE_CLIP_NAME" \
-    "$TIMELINE_DEFAULT_STEPS" <<'PY'
+    "$TIMELINE_DEFAULT_STEPS" \
+    "$TIMELINE_SOURCE_UNET_NAME" <<'PY'
 import json
 import os
 import sys
@@ -156,8 +187,8 @@ if not scheduler_found:
     raise SystemExit("Timeline Director alias is missing BasicScheduler")
 
 serialized = json.dumps(workflow, ensure_ascii=False)
-for old in replacements:
-    if old in serialized:
+for old, new in replacements.items():
+    if old != new and old in serialized:
         raise SystemExit(f"Timeline Director alias still references unsupported model: {old}")
 for expected in (unet_name, clip_name):
     if expected not in serialized:
@@ -175,6 +206,93 @@ PY
   h3_profile_info "Timeline Director URL template alias installed: $TIMELINE_TEMPLATE_ALIAS"
   h3_profile_info "Timeline Director alias uses installed Ref2VA/CLIP models and ${TIMELINE_DEFAULT_STEPS}-step scheduler."
   h3_profile_info "Pinned MiniMax H3 Timeline Director installed at $TIMELINE_NODE_REV."
+}
+
+h3_studio_install_timeline_model() {
+  if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" || "$H3_TIMELINE_MODEL_VARIANT" != "fused" ]]; then
+    return 0
+  fi
+
+  local target_dir="$COMFY_DIR/models/diffusion_models"
+  mkdir -p "$target_dir"
+  h3_profile_ensure_hf
+
+  "$COMFY_PYTHON" - \
+    "$TIMELINE_FUSED_MODEL_REPO" \
+    "$TIMELINE_FUSED_MODEL_FILE" \
+    "$TIMELINE_FUSED_MODEL_REV" \
+    "$TIMELINE_FUSED_MODEL_SHA256" \
+    "$TIMELINE_FUSED_MODEL_SIZE_BYTES" \
+    "$target_dir" <<'PY'
+import hashlib
+import os
+import shutil
+import sys
+
+from huggingface_hub import hf_hub_download
+
+repo, filename, revision, expected_sha256, expected_size, target_dir = sys.argv[1:]
+expected_size = int(expected_size)
+os.makedirs(target_dir, exist_ok=True)
+dst = os.path.join(target_dir, os.path.basename(filename))
+models_root = os.path.dirname(target_dir)
+staging_root = os.path.join(models_root, ".h3_timeline_download")
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+if os.path.isfile(dst):
+    actual_size = os.path.getsize(dst)
+    actual_sha256 = sha256_file(dst) if actual_size == expected_size else ""
+    if actual_size == expected_size and actual_sha256 == expected_sha256:
+        print(f"[OK] verified existing Timeline Director checkpoint: {dst}")
+        raise SystemExit(0)
+    print(
+        "[WARN] Timeline Director checkpoint failed size/SHA verification; "
+        f"removing invalid file: {dst}",
+        file=sys.stderr,
+    )
+    os.remove(dst)
+
+required_free = expected_size + 2 * 1024**3
+available_free = shutil.disk_usage(models_root).free
+if available_free < required_free:
+    raise SystemExit(
+        "Timeline Director fused checkpoint needs at least "
+        f"{required_free} bytes free on {models_root}; only {available_free} bytes are available."
+    )
+
+shutil.rmtree(staging_root, ignore_errors=True)
+os.makedirs(staging_root, exist_ok=True)
+try:
+    src = hf_hub_download(
+        repo_id=repo,
+        filename=filename,
+        revision=revision,
+        local_dir=staging_root,
+    )
+    actual_size = os.path.getsize(src)
+    if actual_size != expected_size:
+        raise SystemExit(
+            "Downloaded Timeline Director checkpoint size mismatch: "
+            f"expected {expected_size}, got {actual_size}"
+        )
+    actual_sha256 = sha256_file(src)
+    if actual_sha256 != expected_sha256:
+        raise SystemExit(
+            "Downloaded Timeline Director checkpoint failed SHA-256 verification: "
+            f"expected {expected_sha256}, got {actual_sha256}"
+        )
+    os.replace(src, dst)
+finally:
+    shutil.rmtree(staging_root, ignore_errors=True)
+
+print(f"[OK] installed pinned Timeline Director checkpoint: {dst} @ {revision}")
+PY
 }
 
 h3_studio_install_webui() {
@@ -248,6 +366,7 @@ import urllib.request
     unet_name,
     clip_name,
     steps_text,
+    source_unet_name,
 ) = sys.argv[1:]
 steps = int(steps_text)
 
@@ -327,10 +446,9 @@ if not isinstance(payload, dict) or not payload.get("nodes"):
     raise SystemExit(1)
 
 serialized = json.dumps(payload, ensure_ascii=False)
-unsupported = (
-    "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
-    r"minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-)
+unsupported = [r"minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"]
+if unet_name != source_unet_name:
+    unsupported.append(source_unet_name)
 bad = [value for value in unsupported if value in serialized]
 if bad:
     print(
@@ -425,9 +543,11 @@ main_studio() {
       ;;
   esac
 
+  h3_studio_configure_timeline_model
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
   h3_studio_install_timeline_director
+  h3_studio_install_timeline_model
   h3_studio_install_webui
 
   # Restart ComfyUI after the Studio-only custom nodes are installed, then
