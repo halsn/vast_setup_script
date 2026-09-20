@@ -22,6 +22,7 @@ def test_h3_studio_smoke_defaults_do_not_generate():
     module = runpy.run_path(str(SMOKE), run_name="h3_studio_smoke_test")
     args = module["parse_args"]([])
     assert args.generate is False
+    assert args.timeline_model == "fused"
     assert args.studio_url == "http://127.0.0.1:18080"
     assert args.comfy_url == "http://127.0.0.1:18188"
     assert args.width == 480
@@ -44,9 +45,12 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
     text = SMOKE.read_text(encoding="utf-8")
     assert 'TIMELINE_SOURCE = "ComfyUI-MiniMaxH3-TimelineDirector"' in text
     assert 'TIMELINE_TEMPLATE = "h3_timeline_director"' in text
-    assert 'TIMELINE_UNET = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"' in text
+    assert 'TIMELINE_SOURCE_UNET = "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors"' in text
     assert 'TIMELINE_CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"' in text
-    assert "TIMELINE_STEPS = 20" in text
+    assert '"fused": {' in text
+    assert '"native": {' in text
+    assert '"steps": 8' in text
+    assert '"steps": 20' in text
     assert '"MiniMaxH3TimelinePlanner"' in text
     assert '"MiniMaxH3FiniteSegmentSampler"' in text
     assert '"MiniMaxH3TimelineSelfLiftSampler"' in text
