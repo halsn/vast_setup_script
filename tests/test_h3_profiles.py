@@ -63,5 +63,12 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "d3cfe21625e5170126ce06fbfcfe1d88108688c3" in text
     assert "T8mars/comfyui-minimax-h3-audio-T8.git" in text
     assert "b92b12f71a4eb0a9288cbbab26a3c05db9a1c433" in text
+    assert "Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git" in text
+    assert "309b626973d049b073e93557ff94603efc2d1272" in text
+    assert "MiniMaxH3全功能合一完全体导演台工作流" in text
+    assert "MiniMaxH3TimelinePlanner" in text
+    assert "MiniMaxH3FiniteSegmentSampler" in text
+    assert "MiniMaxH3TimelineSelfLiftSampler" in text
     assert 'H3_STUDIO_PORT="${H3_STUDIO_PORT:-18080}"' in text
     assert "/api/comfyui/status" in text
+    assert "/workflow_templates" in text

@@ -32,6 +32,12 @@ T8_NODE_NAME="comfyui-minimax-h3-audio-T8"
 T8_NODE_REPO="https://github.com/T8mars/comfyui-minimax-h3-audio-T8.git"
 T8_NODE_REV="b92b12f71a4eb0a9288cbbab26a3c05db9a1c433"
 
+TIMELINE_NODE_NAME="ComfyUI-MiniMaxH3-TimelineDirector"
+TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git"
+TIMELINE_NODE_REV="309b626973d049b073e93557ff94603efc2d1272"
+TIMELINE_TEMPLATE_NAME="MiniMaxH3全功能合一完全体导演台工作流"
+H3_INSTALL_TIMELINE_DIRECTOR="${H3_INSTALL_TIMELINE_DIRECTOR:-1}"
+
 cleanup_studio_profile() {
   h3_profile_cleanup || true
   if [[ -n "${COMMON_TMP:-}" && -f "$COMMON_TMP" ]]; then
@@ -69,6 +75,19 @@ h3_studio_install_runtime_nodes() {
   h3_studio_install_pinned_checkout "$T8_NODE_NAME" "$T8_NODE_REPO" "$T8_NODE_REV" "$t8_target"
   h3_profile_install_requirements "$t8_target"
   h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
+}
+
+h3_studio_install_timeline_director() {
+  if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" ]]; then
+    h3_profile_info "Timeline Director disabled by H3_INSTALL_TIMELINE_DIRECTOR=$H3_INSTALL_TIMELINE_DIRECTOR"
+    return 0
+  fi
+
+  local target="$COMFY_DIR/custom_nodes/$TIMELINE_NODE_NAME"
+  mkdir -p "$COMFY_DIR/custom_nodes"
+  h3_studio_install_pinned_checkout     "$TIMELINE_NODE_NAME"     "$TIMELINE_NODE_REPO"     "$TIMELINE_NODE_REV"     "$target"
+  h3_profile_install_requirements "$target"
+  h3_profile_info "Pinned MiniMax H3 Timeline Director installed at $TIMELINE_NODE_REV."
 }
 
 h3_studio_install_webui() {
@@ -111,6 +130,82 @@ h3_studio_start() {
   else
     supervisorctl start "$H3_STUDIO_SERVICE_NAME"
   fi
+}
+
+
+h3_studio_verify_timeline_director() {
+  if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" ]]; then
+    return 0
+  fi
+
+  "$COMFY_PYTHON" -     "http://127.0.0.1:$COMFY_PORT/object_info"     "http://127.0.0.1:$COMFY_PORT/workflow_templates"     "http://127.0.0.1:$COMFY_PORT/api/workflow_templates"     "$TIMELINE_NODE_NAME"     "$TIMELINE_TEMPLATE_NAME" <<'PY'
+import json
+import sys
+import urllib.parse
+import urllib.request
+
+object_info_url, templates_url, template_base_url, source, template = sys.argv[1:]
+
+def read_json(url):
+    with urllib.request.urlopen(url, timeout=20) as response:
+        return json.load(response)
+
+try:
+    catalog = read_json(object_info_url)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI object catalog: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+required_nodes = (
+    "MiniMaxH3TimelinePlanner",
+    "MiniMaxH3FiniteSegmentSampler",
+    "MiniMaxH3TimelineSelfLiftSampler",
+)
+missing = [name for name in required_nodes if name not in catalog]
+if missing:
+    print(
+        "[ERROR] Timeline Director nodes are not registered: " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+try:
+    templates = read_json(templates_url)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI workflow templates: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+available = templates.get(source) or []
+if template not in available:
+    print(
+        f"[ERROR] Timeline Director template '{template}' is not listed for source '{source}'.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+template_url = (
+    template_base_url.rstrip("/")
+    + "/"
+    + urllib.parse.quote(source, safe="")
+    + "/"
+    + urllib.parse.quote(template + ".json", safe="")
+)
+try:
+    with urllib.request.urlopen(template_url, timeout=20) as response:
+        payload = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not load Timeline Director template: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if not isinstance(payload, dict) or not payload.get("nodes"):
+    print("[ERROR] Timeline Director template JSON is invalid.", file=sys.stderr)
+    raise SystemExit(1)
+
+print(
+    "[OK] Timeline Director nodes and URL-loadable workflow template are ready",
+    file=sys.stderr,
+)
+PY
 }
 
 h3_studio_wait_ready() {
@@ -174,16 +269,18 @@ main_studio() {
 
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
+  h3_studio_install_timeline_director
   h3_studio_install_webui
 
-  # Restart ComfyUI after the Studio-only T8 nodes are installed, then start
-  # the WebUI against the verified local ComfyUI endpoint.
+  # Restart ComfyUI after the Studio-only custom nodes are installed, then
+  # verify the advanced Timeline Director contract before starting the WebUI.
   h3_profile_finish
+  h3_studio_verify_timeline_director
   h3_studio_write_supervisor_config
   h3_studio_start
   h3_studio_wait_ready
 
-  h3_profile_info "H3 Studio ready on 0.0.0.0:$H3_STUDIO_PORT (upstream MIT, pinned revision)."
+  h3_profile_info "H3 Studio ready on 0.0.0.0:$H3_STUDIO_PORT (Studio MIT; Timeline Director GPL-3.0, both pinned)."
 }
 
 main_studio "$@"
