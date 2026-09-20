@@ -48,7 +48,7 @@
       "display_name": "H3 Open Studio",
       "script": "scripts/setupp_h3_studio.sh",
       "status": "preview",
-      "notes": "Native H3 base plus the MIT AntaresAlice/h3-webui Studio pinned to a verified revision and served on port 18080."
+      "notes": "Native H3 base plus the MIT AntaresAlice/h3-webui Studio and the GPL-3.0 MiniMax H3 Timeline Director, both pinned to verified revisions; Studio is served on port 18080."
     }
   ]
 }
