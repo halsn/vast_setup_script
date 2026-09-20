@@ -169,6 +169,15 @@ workflow template 自动暴露。部署时还会复制一个 ASCII 别名
 `h3_timeline_director.json`；ComfyUI 0.34.0 对应的前端 1.49.6 会拒绝 URL
 中的非 ASCII template 标识，所以工作台深链统一使用该别名。
 
+上游示例工作流默认引用作者本地的
+`minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors`
+以及 `minimax_h3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors`。这些并不属于本
+profile 的共享模型清单。部署脚本只改写 ASCII 别名工作流，保持上游原文件不动：
+UNET 切换到已安装的 `minimax_h3_ref2va_pruned_int8_convrot.safetensors`，
+CLIP 切换到已安装的 `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors`，并把默认
+`BasicScheduler` 从作者 Turbo 模型的 8 steps 调整为标准 Ref2VA 的 20 steps。
+部署健康检查和 smoke harness 都会再次核对这些绑定。
+
 KJNodes、VideoHelperSuite、H3 模型与 Refine/latent-upscaler 能力继续由已有 H3
 base/common 层维护，不会为 Timeline Director 再下载一套基础 H3 模型。
 
