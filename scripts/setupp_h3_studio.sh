@@ -37,6 +37,14 @@ TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirecto
 TIMELINE_NODE_REV="309b626973d049b073e93557ff94603efc2d1272"
 TIMELINE_TEMPLATE_SOURCE_NAME="MiniMaxH3全功能合一完全体导演台工作流"
 TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"
+TIMELINE_MODEL_REPO="MATLOWAI/minimax-h3-fused-turbo-int8-convrot"
+TIMELINE_MODEL_REV="3b51096a1bf67608d98131116558202208fcf195"
+TIMELINE_MODEL_FILE="diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors"
+TIMELINE_MODEL_NAME="${TIMELINE_MODEL_FILE##*/}"
+TIMELINE_MODEL_SIZE_BYTES="20980178976"
+TIMELINE_MODEL_SHA256="4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b"
+TIMELINE_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+TIMELINE_SOURCE_CLIP_NAME='minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
 H3_INSTALL_TIMELINE_DIRECTOR="${H3_INSTALL_TIMELINE_DIRECTOR:-1}"
 
 cleanup_studio_profile() {
@@ -99,9 +107,134 @@ h3_studio_install_timeline_director() {
     h3_profile_error "Timeline Director source template is missing: $source_template"
     return 1
   }
-  cp -f "$source_template" "$alias_template"
+  "$COMFY_PYTHON" - \
+    "$source_template" \
+    "$alias_template" \
+    "$TIMELINE_SOURCE_CLIP_NAME" \
+    "$TIMELINE_CLIP_NAME" <<'PY'
+import json
+import os
+import sys
+import tempfile
+
+source, target, old_clip, new_clip = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    workflow = json.load(handle)
+
+replacements = {old_clip: new_clip}
+
+def rewrite(value):
+    if isinstance(value, dict):
+        return {key: rewrite(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [rewrite(child) for child in value]
+    if isinstance(value, str):
+        return replacements.get(value, value)
+    return value
+
+workflow = rewrite(workflow)
+os.makedirs(os.path.dirname(target), exist_ok=True)
+with tempfile.NamedTemporaryFile(
+    "w", encoding="utf-8", dir=os.path.dirname(target), delete=False
+) as handle:
+    json.dump(workflow, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+    temporary = handle.name
+os.replace(temporary, target)
+PY
   h3_profile_info "Timeline Director URL template alias installed: $TIMELINE_TEMPLATE_ALIAS"
   h3_profile_info "Pinned MiniMax H3 Timeline Director installed at $TIMELINE_NODE_REV."
+}
+
+h3_studio_install_timeline_model() {
+  if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" ]]; then
+    return 0
+  fi
+
+  local target_dir="$COMFY_DIR/models/diffusion_models"
+  mkdir -p "$target_dir"
+  h3_profile_ensure_hf
+
+  "$COMFY_PYTHON" - \
+    "$TIMELINE_MODEL_REPO" \
+    "$TIMELINE_MODEL_FILE" \
+    "$TIMELINE_MODEL_REV" \
+    "$TIMELINE_MODEL_SHA256" \
+    "$TIMELINE_MODEL_SIZE_BYTES" \
+    "$target_dir" <<'PY'
+import hashlib
+import os
+import shutil
+import sys
+
+from huggingface_hub import hf_hub_download
+
+repo, filename, revision, expected_sha256, expected_size, target_dir = sys.argv[1:]
+expected_size = int(expected_size)
+os.makedirs(target_dir, exist_ok=True)
+dst = os.path.join(target_dir, os.path.basename(filename))
+models_root = os.path.dirname(target_dir)
+staging_root = os.path.join(models_root, ".h3_timeline_download")
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+if os.path.isfile(dst):
+    actual_size = os.path.getsize(dst)
+    actual_sha256 = sha256_file(dst) if actual_size == expected_size else ""
+    if actual_size == expected_size and actual_sha256 == expected_sha256:
+        print(f"[OK] verified existing Timeline Director checkpoint: {dst}")
+        raise SystemExit(0)
+    print(
+        "[WARN] Timeline Director checkpoint failed size/SHA verification; "
+        f"removing invalid file: {dst}",
+        file=sys.stderr,
+    )
+    os.remove(dst)
+
+# Download directly onto the ComfyUI models filesystem. This avoids keeping
+# another ~20 GiB copy in the global Hugging Face cache.
+required_free = expected_size + 2 * 1024**3
+available_free = shutil.disk_usage(models_root).free
+if available_free < required_free:
+    raise SystemExit(
+        "Timeline Director fused checkpoint needs at least "
+        f"{required_free} bytes free on {models_root}; only {available_free} bytes are available."
+    )
+
+shutil.rmtree(staging_root, ignore_errors=True)
+os.makedirs(staging_root, exist_ok=True)
+try:
+    src = hf_hub_download(
+        repo_id=repo,
+        filename=filename,
+        revision=revision,
+        local_dir=staging_root,
+    )
+    actual_size = os.path.getsize(src)
+    if actual_size != expected_size:
+        raise SystemExit(
+            "Downloaded Timeline Director checkpoint size mismatch: "
+            f"expected {expected_size}, got {actual_size}"
+        )
+    actual_sha256 = sha256_file(src)
+    if actual_sha256 != expected_sha256:
+        raise SystemExit(
+            "Downloaded Timeline Director checkpoint failed SHA-256 verification: "
+            f"expected {expected_sha256}, got {actual_sha256}"
+        )
+    os.replace(src, dst)
+finally:
+    shutil.rmtree(staging_root, ignore_errors=True)
+
+print(f"[OK] installed pinned Timeline Director checkpoint: {dst} @ {revision}")
+PY
 }
 
 h3_studio_install_webui() {
@@ -157,13 +290,23 @@ h3_studio_verify_timeline_director() {
     "http://127.0.0.1:$COMFY_PORT/workflow_templates" \
     "http://127.0.0.1:$COMFY_PORT/api/workflow_templates" \
     "$TIMELINE_NODE_NAME" \
-    "$TIMELINE_TEMPLATE_ALIAS" <<'PY'
+    "$TIMELINE_TEMPLATE_ALIAS" \
+    "$TIMELINE_MODEL_NAME" \
+    "$TIMELINE_CLIP_NAME" <<'PY'
 import json
 import sys
 import urllib.parse
 import urllib.request
 
-object_info_url, templates_url, template_base_url, source, template = sys.argv[1:]
+(
+    object_info_url,
+    templates_url,
+    template_base_url,
+    source,
+    template,
+    model_name,
+    clip_name,
+) = sys.argv[1:]
 
 def read_json(url):
     with urllib.request.urlopen(url, timeout=20) as response:
@@ -184,6 +327,25 @@ missing = [name for name in required_nodes if name not in catalog]
 if missing:
     print(
         "[ERROR] Timeline Director nodes are not registered: " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+visible = set()
+def collect(value):
+    if isinstance(value, str):
+        visible.add(value)
+    elif isinstance(value, list):
+        for item in value:
+            collect(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            collect(item)
+
+collect(catalog.get("UNETLoader", {}))
+if model_name not in visible:
+    print(
+        f"[ERROR] Timeline Director fused checkpoint is not visible to UNETLoader: {model_name}",
         file=sys.stderr,
     )
     raise SystemExit(1)
@@ -220,8 +382,28 @@ if not isinstance(payload, dict) or not payload.get("nodes"):
     print("[ERROR] Timeline Director template JSON is invalid.", file=sys.stderr)
     raise SystemExit(1)
 
+template_strings = set()
+def collect_template(value):
+    if isinstance(value, str):
+        template_strings.add(value)
+    elif isinstance(value, list):
+        for item in value:
+            collect_template(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            collect_template(item)
+
+collect_template(payload)
+for required in (model_name, clip_name):
+    if required not in template_strings:
+        print(
+            f"[ERROR] Timeline Director template does not reference deployed asset: {required}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
 print(
-    "[OK] Timeline Director nodes and URL-loadable workflow template are ready",
+    "[OK] Timeline Director nodes, checkpoint, and URL-loadable workflow template are ready",
     file=sys.stderr,
 )
 PY
@@ -289,6 +471,7 @@ main_studio() {
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
   h3_studio_install_timeline_director
+  h3_studio_install_timeline_model
   h3_studio_install_webui
 
   # Restart ComfyUI after the Studio-only custom nodes are installed, then
