@@ -197,6 +197,33 @@ H3_STUDIO_DIR=/workspace/h3-webui \
 H3_INSTALL_TIMELINE_DIRECTOR=0 bash scripts/setupp_h3_studio.sh
 ```
 
+### Open Studio release smoke
+
+部署完成后可以运行只读 smoke harness。默认模式**不会提交视频生成任务，也不会主动消耗 GPU 推理时间**，只检查 Studio、ComfyUI、Timeline Director 节点与工作流模板契约：
+
+```bash
+python scripts/h3_studio_smoke.py \
+  --studio-url http://127.0.0.1:18080 \
+  --comfy-url http://127.0.0.1:18188
+```
+
+如果脚本不在远端实例上，可以从仓库下载到临时目录后运行：
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/h3_studio_smoke.py \
+  -o /tmp/h3_studio_smoke.py
+python /tmp/h3_studio_smoke.py
+```
+
+真实发布验收需要显式增加 `--generate`。该模式会通过 H3 Studio API 创建临时工作区、提交一个小尺寸 T2V、监听 SSE 直到完成、校验输出视频，然后清理临时工作区：
+
+```bash
+python scripts/h3_studio_smoke.py --generate
+```
+
+`--generate` 会真实占用 GPU，并可能产生 Vast 租机费用，因此 CI 和部署脚本都不会自动执行它。需要保留测试工作区时加 `--keep-workspace`。
+
 ## 共享 Refine / 生成后高清增强
 
 所有用户可选 H3 profile 默认安装固定版本的 3D latent 二采节点与 FP16 checkpoint，同时安装固定版本的 `ComfyUi-MpiNodes`。其中 `MpiSaveLatent` / `MpiLoadLatent` 可以正确保存和恢复 MiniMax H3 的 packed 视频+音频 Latent。
