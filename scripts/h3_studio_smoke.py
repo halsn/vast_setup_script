@@ -20,6 +20,9 @@ from typing import Any
 
 TIMELINE_SOURCE = "ComfyUI-MiniMaxH3-TimelineDirector"
 TIMELINE_TEMPLATE = "h3_timeline_director"
+TIMELINE_UNET = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+TIMELINE_CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+TIMELINE_STEPS = 20
 REQUIRED_TIMELINE_NODES = (
     "MiniMaxH3TimelinePlanner",
     "MiniMaxH3FiniteSegmentSampler",
@@ -88,6 +91,22 @@ def check_contract(studio_url: str, comfy_url: str) -> None:
             "Timeline Director nodes are missing: " + ", ".join(missing)
         )
 
+    def combo_options(node_name: str, input_name: str) -> list[str]:
+        try:
+            value = catalog[node_name]["input"]["required"][input_name][0]
+        except (KeyError, IndexError, TypeError):
+            return []
+        return value if isinstance(value, list) else []
+
+    if TIMELINE_UNET not in combo_options("UNETLoader", "unet_name"):
+        raise RuntimeError(
+            f"Timeline Director UNET is not selectable: {TIMELINE_UNET}"
+        )
+    if TIMELINE_CLIP not in combo_options("CLIPLoader", "clip_name"):
+        raise RuntimeError(
+            f"Timeline Director CLIP is not selectable: {TIMELINE_CLIP}"
+        )
+
     print("[4/5] Timeline Director template catalog")
     templates = request(_url(comfy_url, "/workflow_templates")).json()
     available = templates.get(TIMELINE_SOURCE) or []
@@ -106,6 +125,33 @@ def check_contract(studio_url: str, comfy_url: str) -> None:
     workflow = request(_url(comfy_url, path)).json()
     if not isinstance(workflow, dict) or not workflow.get("nodes"):
         raise RuntimeError("Timeline Director template JSON is missing workflow nodes")
+
+    serialized = json.dumps(workflow, ensure_ascii=False)
+    unsupported = (
+        "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+        r"minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    )
+    bad = [value for value in unsupported if value in serialized]
+    if bad:
+        raise RuntimeError(
+            "Timeline Director template still references unsupported models: "
+            + ", ".join(bad)
+        )
+    for expected in (TIMELINE_UNET, TIMELINE_CLIP):
+        if expected not in serialized:
+            raise RuntimeError(
+                f"Timeline Director template does not use installed model: {expected}"
+            )
+
+    scheduler_steps = [
+        (node.get("widgets_values_named") or {}).get("steps")
+        for node in workflow.get("nodes", [])
+        if node.get("type") == "BasicScheduler"
+    ]
+    if scheduler_steps != [TIMELINE_STEPS]:
+        raise RuntimeError(
+            f"Timeline Director scheduler mismatch: {scheduler_steps} != {[TIMELINE_STEPS]}"
+        )
 
     print("[OK] H3 Studio contract smoke passed")
 
