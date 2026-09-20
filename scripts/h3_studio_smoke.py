@@ -20,9 +20,19 @@ from typing import Any
 
 TIMELINE_SOURCE = "ComfyUI-MiniMaxH3-TimelineDirector"
 TIMELINE_TEMPLATE = "h3_timeline_director"
-TIMELINE_UNET = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+TIMELINE_SOURCE_UNET = "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors"
+TIMELINE_SOURCE_CLIP = r"minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 TIMELINE_CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
-TIMELINE_STEPS = 20
+TIMELINE_VARIANTS = {
+    "fused": {
+        "unet": TIMELINE_SOURCE_UNET,
+        "steps": 8,
+    },
+    "native": {
+        "unet": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "steps": 20,
+    },
+}
 REQUIRED_TIMELINE_NODES = (
     "MiniMaxH3TimelinePlanner",
     "MiniMaxH3FiniteSegmentSampler",
@@ -72,7 +82,15 @@ def request(
         raise RuntimeError(f"{method} {url} failed: {exc}") from exc
 
 
-def check_contract(studio_url: str, comfy_url: str) -> None:
+def check_contract(
+    studio_url: str,
+    comfy_url: str,
+    *,
+    timeline_model: str = "fused",
+) -> None:
+    variant = TIMELINE_VARIANTS[timeline_model]
+    timeline_unet = str(variant["unet"])
+    timeline_steps = int(variant["steps"])
     print("[1/5] H3 Studio HTTP")
     home = request(_url(studio_url, "/"))
     if home.status != 200:
@@ -98,9 +116,9 @@ def check_contract(studio_url: str, comfy_url: str) -> None:
             return []
         return value if isinstance(value, list) else []
 
-    if TIMELINE_UNET not in combo_options("UNETLoader", "unet_name"):
+    if timeline_unet not in combo_options("UNETLoader", "unet_name"):
         raise RuntimeError(
-            f"Timeline Director UNET is not selectable: {TIMELINE_UNET}"
+            f"Timeline Director UNET is not selectable: {timeline_unet}"
         )
     if TIMELINE_CLIP not in combo_options("CLIPLoader", "clip_name"):
         raise RuntimeError(
@@ -127,17 +145,16 @@ def check_contract(studio_url: str, comfy_url: str) -> None:
         raise RuntimeError("Timeline Director template JSON is missing workflow nodes")
 
     serialized = json.dumps(workflow, ensure_ascii=False)
-    unsupported = (
-        "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
-        r"minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-    )
+    unsupported = [TIMELINE_SOURCE_CLIP]
+    if timeline_unet != TIMELINE_SOURCE_UNET:
+        unsupported.append(TIMELINE_SOURCE_UNET)
     bad = [value for value in unsupported if value in serialized]
     if bad:
         raise RuntimeError(
             "Timeline Director template still references unsupported models: "
             + ", ".join(bad)
         )
-    for expected in (TIMELINE_UNET, TIMELINE_CLIP):
+    for expected in (timeline_unet, TIMELINE_CLIP):
         if expected not in serialized:
             raise RuntimeError(
                 f"Timeline Director template does not use installed model: {expected}"
@@ -148,9 +165,9 @@ def check_contract(studio_url: str, comfy_url: str) -> None:
         for node in workflow.get("nodes", [])
         if node.get("type") == "BasicScheduler"
     ]
-    if scheduler_steps != [TIMELINE_STEPS]:
+    if scheduler_steps != [timeline_steps]:
         raise RuntimeError(
-            f"Timeline Director scheduler mismatch: {scheduler_steps} != {[TIMELINE_STEPS]}"
+            f"Timeline Director scheduler mismatch: {scheduler_steps} != {[timeline_steps]}"
         )
 
     print("[OK] H3 Studio contract smoke passed")
@@ -298,6 +315,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="ComfyUI base URL",
     )
     parser.add_argument(
+        "--timeline-model",
+        choices=sorted(TIMELINE_VARIANTS),
+        default="fused",
+        help="expected Timeline Director model variant (default: fused)",
+    )
+    parser.add_argument(
         "--generate",
         action="store_true",
         help="submit a small real T2V generation (uses GPU time / may incur cost)",
@@ -335,7 +358,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    check_contract(args.studio_url, args.comfy_url)
+    check_contract(
+        args.studio_url,
+        args.comfy_url,
+        timeline_model=args.timeline_model,
+    )
 
     if not args.generate:
         print("[INFO] GPU generation skipped. Re-run with --generate for the release smoke.")

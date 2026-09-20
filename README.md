@@ -169,14 +169,24 @@ workflow template 自动暴露。部署时还会复制一个 ASCII 别名
 `h3_timeline_director.json`；ComfyUI 0.34.0 对应的前端 1.49.6 会拒绝 URL
 中的非 ASCII template 标识，所以工作台深链统一使用该别名。
 
-上游示例工作流默认引用作者本地的
-`minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors`
-以及 `minimax_h3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors`。这些并不属于本
-profile 的共享模型清单。部署脚本只改写 ASCII 别名工作流，保持上游原文件不动：
-UNET 切换到已安装的 `minimax_h3_ref2va_pruned_int8_convrot.safetensors`，
-CLIP 切换到已安装的 `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors`，并把默认
-`BasicScheduler` 从作者 Turbo 模型的 8 steps 调整为标准 Ref2VA 的 20 steps。
-部署健康检查和 smoke harness 都会再次核对这些绑定。
+上游示例工作流默认引用
+`minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors`。
+Open Studio 默认使用 `H3_TIMELINE_MODEL_VARIANT=fused`，从
+`MATLOWAI/minimax-h3-fused-turbo-int8-convrot` 固定 revision
+`3b51096a1bf67608d98131116558202208fcf195` 下载该 20,980,178,976-byte
+checkpoint，并校验 SHA-256
+`4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b`。
+下载使用 ComfyUI models 同文件系统的 staging 目录，避免 Hugging Face 全局 cache
+再永久保留一份约 20 GiB 权重。该模型仓库标注 MiniMax H3 Community License
+Agreement；它是 H3 模型衍生权重而不是 MIT/Apache 权重。
+
+ASCII 别名工作流保持上游 fused UNET 和 8-step 默认调度，只把
+`minimax_h3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` 归一化到本项目实际
+安装的 `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors`。如果不希望额外下载约
+20 GiB fused checkpoint，可设置 `H3_TIMELINE_MODEL_VARIANT=native`：此时别名
+改用已随 H3 base 安装的 `minimax_h3_ref2va_pruned_int8_convrot.safetensors`，
+并将默认 `BasicScheduler` 调整为 20 steps。部署健康检查和 smoke harness 会按
+实际 variant 核对模型选择、CLIP 路径与 steps。
 
 KJNodes、VideoHelperSuite、H3 模型与 Refine/latent-upscaler 能力继续由已有 H3
 base/common 层维护，不会为 Timeline Director 再下载一套基础 H3 模型。
@@ -202,6 +212,9 @@ H3_STUDIO_PORT=18080 \
 H3_STUDIO_DIR=/workspace/h3-webui \
   bash scripts/setupp_h3_studio.sh
 
+# 不额外下载 fused checkpoint，使用 base 自带 Ref2VA + 20 steps
+H3_TIMELINE_MODEL_VARIANT=native bash scripts/setupp_h3_studio.sh
+
 # 仅在明确不需要高级长视频导演台时关闭
 H3_INSTALL_TIMELINE_DIRECTOR=0 bash scripts/setupp_h3_studio.sh
 ```
@@ -213,7 +226,8 @@ H3_INSTALL_TIMELINE_DIRECTOR=0 bash scripts/setupp_h3_studio.sh
 ```bash
 python scripts/h3_studio_smoke.py \
   --studio-url http://127.0.0.1:18080 \
-  --comfy-url http://127.0.0.1:18188
+  --comfy-url http://127.0.0.1:18188 \
+  --timeline-model fused
 ```
 
 如果脚本不在远端实例上，可以从仓库下载到临时目录后运行：
@@ -231,6 +245,8 @@ python /tmp/h3_studio_smoke.py
 python scripts/h3_studio_smoke.py --generate
 ```
 
+`--timeline-model` 默认是 `fused`；若部署时使用了
+`H3_TIMELINE_MODEL_VARIANT=native`，smoke 时对应传 `--timeline-model native`。
 `--generate` 会真实占用 GPU，并可能产生 Vast 租机费用，因此 CI 和部署脚本都不会自动执行它。需要保留测试工作区时加 `--keep-workspace`。
 
 ## 共享 Refine / 生成后高清增强

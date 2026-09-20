@@ -67,12 +67,20 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "309b626973d049b073e93557ff94603efc2d1272" in text
     assert "MiniMaxH3全功能合一完全体导演台工作流" in text
     assert 'TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"' in text
-    assert 'TIMELINE_UNET_NAME="minimax_h3_ref2va_pruned_int8_convrot.safetensors"' in text
+    assert 'H3_TIMELINE_MODEL_VARIANT="${H3_TIMELINE_MODEL_VARIANT:-fused}"' in text
+    assert 'TIMELINE_NATIVE_UNET_NAME="minimax_h3_ref2va_pruned_int8_convrot.safetensors"' in text
+    assert 'TIMELINE_NATIVE_STEPS="20"' in text
+    assert 'TIMELINE_FUSED_MODEL_REPO="MATLOWAI/minimax-h3-fused-turbo-int8-convrot"' in text
+    assert 'TIMELINE_FUSED_MODEL_REV="3b51096a1bf67608d98131116558202208fcf195"' in text
+    assert 'TIMELINE_FUSED_MODEL_SIZE_BYTES="20980178976"' in text
+    assert 'TIMELINE_FUSED_MODEL_SHA256="4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b"' in text
+    assert 'TIMELINE_FUSED_STEPS="8"' in text
     assert 'TIMELINE_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"' in text
-    assert 'TIMELINE_DEFAULT_STEPS="20"' in text
     assert 'cp -f "$source_template" "$alias_template"' in text
-    assert "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors" in text
+    assert ".h3_timeline_download" in text
+    assert "hf_hub_download" in text
     assert 'named["steps"] = steps' in text
+    assert "H3_TIMELINE_MODEL_VARIANT must be fused or native" in text
     assert "MiniMaxH3TimelinePlanner" in text
     assert "MiniMaxH3FiniteSegmentSampler" in text
     assert "MiniMaxH3TimelineSelfLiftSampler" in text
