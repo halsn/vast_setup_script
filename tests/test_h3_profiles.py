@@ -66,6 +66,8 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git" in text
     assert "309b626973d049b073e93557ff94603efc2d1272" in text
     assert "MiniMaxH3全功能合一完全体导演台工作流" in text
+    assert 'TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"' in text
+    assert 'cp -f "$source_template" "$alias_template"' in text
     assert "MiniMaxH3TimelinePlanner" in text
     assert "MiniMaxH3FiniteSegmentSampler" in text
     assert "MiniMaxH3TimelineSelfLiftSampler" in text
