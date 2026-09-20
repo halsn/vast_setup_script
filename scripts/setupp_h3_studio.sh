@@ -142,8 +142,7 @@ h3_studio_install_timeline_director() {
     "$alias_template" \
     "$TIMELINE_UNET_NAME" \
     "$TIMELINE_CLIP_NAME" \
-    "$TIMELINE_DEFAULT_STEPS" \
-    "$TIMELINE_SOURCE_UNET_NAME" <<'PY'
+    "$TIMELINE_DEFAULT_STEPS" <<'PY'
 import json
 import os
 import sys
@@ -204,7 +203,7 @@ os.replace(temporary, path)
 PY
 
   h3_profile_info "Timeline Director URL template alias installed: $TIMELINE_TEMPLATE_ALIAS"
-  h3_profile_info "Timeline Director alias uses installed Ref2VA/CLIP models and ${TIMELINE_DEFAULT_STEPS}-step scheduler."
+  h3_profile_info "Timeline Director alias uses $TIMELINE_UNET_NAME + $TIMELINE_CLIP_NAME with $TIMELINE_DEFAULT_STEPS steps."
   h3_profile_info "Pinned MiniMax H3 Timeline Director installed at $TIMELINE_NODE_REV."
 }
 
@@ -351,7 +350,8 @@ h3_studio_verify_timeline_director() {
     "$TIMELINE_TEMPLATE_ALIAS" \
     "$TIMELINE_UNET_NAME" \
     "$TIMELINE_CLIP_NAME" \
-    "$TIMELINE_DEFAULT_STEPS" <<'PY'
+    "$TIMELINE_DEFAULT_STEPS" \
+    "$TIMELINE_SOURCE_UNET_NAME" <<'PY'
 import json
 import sys
 import urllib.parse
