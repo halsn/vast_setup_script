@@ -37,6 +37,9 @@ TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirecto
 TIMELINE_NODE_REV="309b626973d049b073e93557ff94603efc2d1272"
 TIMELINE_TEMPLATE_SOURCE_NAME="MiniMaxH3全功能合一完全体导演台工作流"
 TIMELINE_TEMPLATE_ALIAS="h3_timeline_director"
+TIMELINE_UNET_NAME="minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+TIMELINE_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+TIMELINE_DEFAULT_STEPS="20"
 H3_INSTALL_TIMELINE_DIRECTOR="${H3_INSTALL_TIMELINE_DIRECTOR:-1}"
 
 cleanup_studio_profile() {
@@ -100,7 +103,77 @@ h3_studio_install_timeline_director() {
     return 1
   }
   cp -f "$source_template" "$alias_template"
+
+  # The pinned upstream example uses a creator-specific fused Turbo checkpoint
+  # and a CLIP subdirectory name that are not part of our shared H3 model
+  # manifest. Rewrite only the URL alias to the models this profile actually
+  # installs, keeping the upstream source workflow untouched.
+  "$COMFY_PYTHON" - \
+    "$alias_template" \
+    "$TIMELINE_UNET_NAME" \
+    "$TIMELINE_CLIP_NAME" \
+    "$TIMELINE_DEFAULT_STEPS" <<'PY'
+import json
+import os
+import sys
+import tempfile
+
+path, unet_name, clip_name, steps_text = sys.argv[1:]
+steps = int(steps_text)
+
+with open(path, encoding="utf-8") as handle:
+    workflow = json.load(handle)
+
+replacements = {
+    "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors": unet_name,
+    r"minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": clip_name,
+}
+
+def rewrite(value):
+    if isinstance(value, dict):
+        return {key: rewrite(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [rewrite(child) for child in value]
+    if isinstance(value, str):
+        return replacements.get(value, value)
+    return value
+
+workflow = rewrite(workflow)
+
+scheduler_found = False
+for node in workflow.get("nodes", []):
+    if node.get("type") != "BasicScheduler":
+        continue
+    named = node.get("widgets_values_named")
+    if isinstance(named, dict):
+        named["steps"] = steps
+    values = node.get("widgets_values")
+    if isinstance(values, list) and len(values) >= 2:
+        values[1] = steps
+    scheduler_found = True
+
+if not scheduler_found:
+    raise SystemExit("Timeline Director alias is missing BasicScheduler")
+
+serialized = json.dumps(workflow, ensure_ascii=False)
+for old in replacements:
+    if old in serialized:
+        raise SystemExit(f"Timeline Director alias still references unsupported model: {old}")
+for expected in (unet_name, clip_name):
+    if expected not in serialized:
+        raise SystemExit(f"Timeline Director alias does not reference installed model: {expected}")
+
+with tempfile.NamedTemporaryFile(
+    "w", encoding="utf-8", dir=os.path.dirname(path), delete=False
+) as handle:
+    json.dump(workflow, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+    temporary = handle.name
+os.replace(temporary, path)
+PY
+
   h3_profile_info "Timeline Director URL template alias installed: $TIMELINE_TEMPLATE_ALIAS"
+  h3_profile_info "Timeline Director alias uses installed Ref2VA/CLIP models and ${TIMELINE_DEFAULT_STEPS}-step scheduler."
   h3_profile_info "Pinned MiniMax H3 Timeline Director installed at $TIMELINE_NODE_REV."
 }
 
@@ -157,13 +230,26 @@ h3_studio_verify_timeline_director() {
     "http://127.0.0.1:$COMFY_PORT/workflow_templates" \
     "http://127.0.0.1:$COMFY_PORT/api/workflow_templates" \
     "$TIMELINE_NODE_NAME" \
-    "$TIMELINE_TEMPLATE_ALIAS" <<'PY'
+    "$TIMELINE_TEMPLATE_ALIAS" \
+    "$TIMELINE_UNET_NAME" \
+    "$TIMELINE_CLIP_NAME" \
+    "$TIMELINE_DEFAULT_STEPS" <<'PY'
 import json
 import sys
 import urllib.parse
 import urllib.request
 
-object_info_url, templates_url, template_base_url, source, template = sys.argv[1:]
+(
+    object_info_url,
+    templates_url,
+    template_base_url,
+    source,
+    template,
+    unet_name,
+    clip_name,
+    steps_text,
+) = sys.argv[1:]
+steps = int(steps_text)
 
 def read_json(url):
     with urllib.request.urlopen(url, timeout=20) as response:
@@ -184,6 +270,26 @@ missing = [name for name in required_nodes if name not in catalog]
 if missing:
     print(
         "[ERROR] Timeline Director nodes are not registered: " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+def combo_options(node_name, input_name):
+    try:
+        value = catalog[node_name]["input"]["required"][input_name][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    return value if isinstance(value, list) else []
+
+if unet_name not in combo_options("UNETLoader", "unet_name"):
+    print(
+        f"[ERROR] Timeline Director UNET is not selectable in ComfyUI: {unet_name}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if clip_name not in combo_options("CLIPLoader", "clip_name"):
+    print(
+        f"[ERROR] Timeline Director CLIP is not selectable in ComfyUI: {clip_name}",
         file=sys.stderr,
     )
     raise SystemExit(1)
@@ -220,8 +326,41 @@ if not isinstance(payload, dict) or not payload.get("nodes"):
     print("[ERROR] Timeline Director template JSON is invalid.", file=sys.stderr)
     raise SystemExit(1)
 
+serialized = json.dumps(payload, ensure_ascii=False)
+unsupported = (
+    "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+    r"minimax_h3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+)
+bad = [value for value in unsupported if value in serialized]
+if bad:
+    print(
+        "[ERROR] Timeline Director alias still references unsupported upstream models: "
+        + ", ".join(bad),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+for expected in (unet_name, clip_name):
+    if expected not in serialized:
+        print(
+            f"[ERROR] Timeline Director alias does not use installed model: {expected}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+scheduler_steps = [
+    (node.get("widgets_values_named") or {}).get("steps")
+    for node in payload.get("nodes", [])
+    if node.get("type") == "BasicScheduler"
+]
+if scheduler_steps != [steps]:
+    print(
+        f"[ERROR] Timeline Director scheduler steps mismatch: {scheduler_steps} != {[steps]}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 print(
-    "[OK] Timeline Director nodes and URL-loadable workflow template are ready",
+    "[OK] Timeline Director nodes, installed models, and URL-loadable workflow template are ready",
     file=sys.stderr,
 )
 PY
