@@ -38,6 +38,10 @@ REQUIRED_TIMELINE_NODES = (
     "MiniMaxH3FiniteSegmentSampler",
     "MiniMaxH3TimelineSelfLiftSampler",
 )
+T8_DIRECTOR_NODE = "MiniMaxH3DirectorProjectT8"
+T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"
+T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"
+T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"
 
 
 @dataclass
@@ -91,18 +95,34 @@ def check_contract(
     variant = TIMELINE_VARIANTS[timeline_model]
     timeline_unet = str(variant["unet"])
     timeline_steps = int(variant["steps"])
-    print("[1/5] H3 Studio HTTP")
+    print("[1/7] H3 Studio HTTP")
     home = request(_url(studio_url, "/"))
     if home.status != 200:
         raise RuntimeError(f"Studio root returned HTTP {home.status}")
 
-    print("[2/5] H3 Studio -> ComfyUI bridge")
+    print("[2/7] H3 Studio -> ComfyUI bridge")
     status = request(_url(studio_url, "/api/comfyui/status")).json()
     if status.get("up") is not True:
         raise RuntimeError(f"Studio cannot reach ComfyUI: {status}")
 
-    print("[3/5] Timeline Director nodes")
+    print("[3/7] T8 Obsidian Director")
     catalog = request(_url(comfy_url, "/object_info"), timeout=30).json()
+    if T8_DIRECTOR_NODE not in catalog:
+        raise RuntimeError(f"T8 Obsidian Director node is missing: {T8_DIRECTOR_NODE}")
+    director_ui = request(_url(comfy_url, T8_DIRECTOR_UI))
+    director_html = director_ui.body.decode("utf-8", "replace")
+    if "曜石导演台" not in director_html and "Obsidian" not in director_html:
+        raise RuntimeError("T8 Obsidian Director UI route returned unexpected content")
+    capabilities = request(_url(comfy_url, T8_DIRECTOR_CAPABILITIES)).json()
+    if capabilities.get("schema") != T8_DIRECTOR_SCHEMA:
+        raise RuntimeError(
+            "T8 Obsidian Director capabilities schema mismatch: "
+            + str(capabilities.get("schema"))
+        )
+    if not capabilities.get("capabilities"):
+        raise RuntimeError("T8 Obsidian Director capabilities inventory is empty")
+
+    print("[4/7] Timeline Director nodes")
     missing = [name for name in REQUIRED_TIMELINE_NODES if name not in catalog]
     if missing:
         raise RuntimeError(
@@ -125,7 +145,7 @@ def check_contract(
             f"Timeline Director CLIP is not selectable: {TIMELINE_CLIP}"
         )
 
-    print("[4/5] Timeline Director template catalog")
+    print("[5/7] Timeline Director template catalog")
     templates = request(_url(comfy_url, "/workflow_templates")).json()
     available = templates.get(TIMELINE_SOURCE) or []
     if TIMELINE_TEMPLATE not in available:
@@ -133,7 +153,7 @@ def check_contract(
             f"Template {TIMELINE_TEMPLATE!r} is not listed for {TIMELINE_SOURCE!r}"
         )
 
-    print("[5/5] Timeline Director template payload")
+    print("[6/7] Timeline Director template payload")
     path = (
         "/api/workflow_templates/"
         + urllib.parse.quote(TIMELINE_SOURCE, safe="")
@@ -170,7 +190,8 @@ def check_contract(
             f"Timeline Director scheduler mismatch: {scheduler_steps} != {[timeline_steps]}"
         )
 
-    print("[OK] H3 Studio contract smoke passed")
+    print("[7/7] Cross-surface contract complete")
+    print("[OK] H3 Studio + T8 Director + Timeline Director contract smoke passed")
 
 
 def create_workspace(studio_url: str, name: str) -> None:
@@ -300,7 +321,7 @@ def verify_generated_media(studio_url: str, workspace: str, event: dict[str, Any
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate H3 Open Studio + Timeline Director. "
+            "Validate H3 Open Studio + T8 Obsidian Director + Timeline Director. "
             "Default mode is read-only; --generate submits real GPU work."
         )
     )
