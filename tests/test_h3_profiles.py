@@ -87,6 +87,12 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert 'H3_STUDIO_PORT="${H3_STUDIO_PORT:-18080}"' in text
     assert "/api/comfyui/status" in text
     assert "/workflow_templates" in text
+    assert "h3_studio_verify_webui_node_contract" in text
+    assert "MiniMaxH3AudioConditioningT8" in text
+    assert "MiniMaxH3DualClockSamplerT8" in text
+    assert "MiniMaxH3AVDecodeT8" in text
+    assert "MiniMaxH3ReferenceToVideo" in text
+    assert "VHS_VideoCombine" in text
     assert "MiniMaxH3DirectorProjectT8" in text
     assert "/minimax_h3_t8/director/ui" in text
     assert "/minimax_h3_t8/director/capabilities" in text
