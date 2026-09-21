@@ -161,7 +161,11 @@ Studio 依赖的 T8 H3 运行时固定到
 该 revision 除双时钟/音频节点外还包含 **曜石导演台**：项目、素材、镜头、顺序生成、
 双采样与 D3 能力入口都由 T8 自己维护，Vast Workspace 只通过 ComfyUI 路由承载其 UI。
 其根目录 `LICENSE` 明确声明 GPL-3.0-or-later；本项目按固定 revision 外部安装，
-不把 T8 源码复制进本仓库。
+不把 T8 源码复制进本仓库。安装目录固定为 `custom_nodes/minimax-h3-audio-T8`：
+ComfyUI 会用 custom-node 目录名生成 `/extensions/<name>/` 路由，而曜石导演台会从
+`/extensions/minimax-h3-audio-T8/director/workbench.mjs` 动态加载工作台模块。
+旧版 Open Studio 使用过 `comfyui-minimax-h3-audio-T8` 目录，部署脚本会安全迁移其
+Git checkout，避免节点后端正常但导演台前端模块 404。
 
 同一 profile 还会安装
 [Songssx/ComfyUI-MiniMaxH3-TimelineDirector](https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector)
@@ -207,7 +211,8 @@ Studio 由 Supervisor 托管，环境变量把它指向同一 ComfyUI 的 input/
 包括 T8 Conditioning/DualClock/AVDecode、Ref2VA、KJ 低显存节点、VHS 和 ComfyUI
 原生采样/视频节点；缺任一节点都不会标记 ready。随后校验 T8 曜石导演台的
 `MiniMaxH3DirectorProjectT8` 节点、`/minimax_h3_t8/director/ui` 页面以及
-`/minimax_h3_t8/director/capabilities` 能力清单，然后再强校验 Timeline Director 的核心节点
+`/minimax_h3_t8/director/capabilities` 能力清单以及 `/extensions/minimax-h3-audio-T8/director/workbench.mjs` 前端模块，
+然后再强校验 Timeline Director 的核心节点
 `MiniMaxH3TimelinePlanner`、`MiniMaxH3FiniteSegmentSampler`、
 `MiniMaxH3TimelineSelfLiftSampler`，并确认 ASCII 别名 `h3_timeline_director` 能通过 ComfyUI
 `workflow_templates` API 被 URL 加载；随后再验证 Studio 首页以及
