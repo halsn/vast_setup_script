@@ -57,6 +57,12 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
     assert '"native": {' in text
     assert '"steps": 8' in text
     assert '"steps": 20' in text
+    assert 'REQUIRED_STUDIO_NODES = (' in text
+    assert '"MiniMaxH3AudioConditioningT8"' in text
+    assert '"MiniMaxH3DualClockSamplerT8"' in text
+    assert '"MiniMaxH3AVDecodeT8"' in text
+    assert '"MiniMaxH3ReferenceToVideo"' in text
+    assert '"VHS_VideoCombine"' in text
     assert 'T8_DIRECTOR_NODE = "MiniMaxH3DirectorProjectT8"' in text
     assert 'T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"' in text
     assert 'T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"' in text
@@ -112,6 +118,7 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
     timeline_source = module["TIMELINE_SOURCE"]
     timeline_template = module["TIMELINE_TEMPLATE"]
     timeline_clip = module["TIMELINE_CLIP"]
+    required_studio_nodes = module["REQUIRED_STUDIO_NODES"]
     required_timeline_nodes = module["REQUIRED_TIMELINE_NODES"]
 
     variant = variants[timeline_model]
@@ -119,6 +126,7 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
     steps = variant["steps"]
 
     object_info = {
+        **{name: {} for name in required_studio_nodes},
         "MiniMaxH3DirectorProjectT8": {},
         **{name: {} for name in required_timeline_nodes},
         "UNETLoader": {
