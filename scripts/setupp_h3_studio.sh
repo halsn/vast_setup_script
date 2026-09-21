@@ -30,7 +30,7 @@ KJ_NODE_REPO="https://github.com/kijai/ComfyUI-KJNodes.git"
 KJ_NODE_REV="d3cfe21625e5170126ce06fbfcfe1d88108688c3"
 T8_NODE_NAME="comfyui-minimax-h3-audio-T8"
 T8_NODE_REPO="https://github.com/T8mars/comfyui-minimax-h3-audio-T8.git"
-T8_NODE_REV="b92b12f71a4eb0a9288cbbab26a3c05db9a1c433"
+T8_NODE_REV="2657a6ddf4143998be16d55d24fb03ac0cc5a794"
 
 TIMELINE_NODE_NAME="ComfyUI-MiniMaxH3-TimelineDirector"
 TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git"
@@ -337,6 +337,64 @@ h3_studio_start() {
 }
 
 
+h3_studio_verify_t8_director() {
+  "$COMFY_PYTHON" - \
+    "http://127.0.0.1:$COMFY_PORT/object_info" \
+    "http://127.0.0.1:$COMFY_PORT/minimax_h3_t8/director/ui" \
+    "http://127.0.0.1:$COMFY_PORT/minimax_h3_t8/director/capabilities" <<'PY'
+import json
+import sys
+import urllib.request
+
+object_info_url, ui_url, capabilities_url = sys.argv[1:]
+
+try:
+    with urllib.request.urlopen(object_info_url, timeout=20) as response:
+        catalog = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI object catalog for T8 Director: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+required_node = "MiniMaxH3DirectorProjectT8"
+if required_node not in catalog:
+    print(f"[ERROR] T8 Obsidian Director node is not registered: {required_node}", file=sys.stderr)
+    raise SystemExit(1)
+
+try:
+    with urllib.request.urlopen(ui_url, timeout=20) as response:
+        html = response.read().decode("utf-8", "replace")
+except Exception as exc:
+    print(f"[ERROR] Could not load T8 Obsidian Director UI: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if "曜石导演台" not in html and "Obsidian" not in html:
+    print("[ERROR] T8 Director UI route returned unexpected content.", file=sys.stderr)
+    raise SystemExit(1)
+
+try:
+    with urllib.request.urlopen(capabilities_url, timeout=20) as response:
+        capabilities = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not read T8 Director capabilities: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if capabilities.get("schema") != "t8.minimax_h3.director_capabilities.v1":
+    print(
+        "[ERROR] T8 Director capabilities schema mismatch: "
+        + str(capabilities.get("schema")),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+rows = capabilities.get("capabilities")
+if not isinstance(rows, list) or not rows:
+    print("[ERROR] T8 Director capabilities inventory is empty.", file=sys.stderr)
+    raise SystemExit(1)
+
+print("[OK] T8 Obsidian Director node, UI and capabilities routes are ready", file=sys.stderr)
+PY
+}
+
 h3_studio_verify_timeline_director() {
   if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" ]]; then
     return 0
@@ -553,12 +611,13 @@ main_studio() {
   # Restart ComfyUI after the Studio-only custom nodes are installed, then
   # verify the advanced Timeline Director contract before starting the WebUI.
   h3_profile_finish
+  h3_studio_verify_t8_director
   h3_studio_verify_timeline_director
   h3_studio_write_supervisor_config
   h3_studio_start
   h3_studio_wait_ready
 
-  h3_profile_info "H3 Studio ready on 0.0.0.0:$H3_STUDIO_PORT (Studio MIT; Timeline Director GPL-3.0, both pinned)."
+  h3_profile_info "H3 Studio ready on 0.0.0.0:$H3_STUDIO_PORT (Studio + T8 Obsidian Director + Timeline Director, all pinned)."
 }
 
 main_studio "$@"

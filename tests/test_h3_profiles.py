@@ -62,7 +62,7 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "kijai/ComfyUI-KJNodes.git" in text
     assert "d3cfe21625e5170126ce06fbfcfe1d88108688c3" in text
     assert "T8mars/comfyui-minimax-h3-audio-T8.git" in text
-    assert "b92b12f71a4eb0a9288cbbab26a3c05db9a1c433" in text
+    assert "2657a6ddf4143998be16d55d24fb03ac0cc5a794" in text
     assert "Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git" in text
     assert "309b626973d049b073e93557ff94603efc2d1272" in text
     assert "MiniMaxH3全功能合一完全体导演台工作流" in text
@@ -87,3 +87,6 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert 'H3_STUDIO_PORT="${H3_STUDIO_PORT:-18080}"' in text
     assert "/api/comfyui/status" in text
     assert "/workflow_templates" in text
+    assert "MiniMaxH3DirectorProjectT8" in text
+    assert "/minimax_h3_t8/director/ui" in text
+    assert "/minimax_h3_t8/director/capabilities" in text

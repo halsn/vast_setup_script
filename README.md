@@ -28,7 +28,7 @@
 | VDN | `scripts/setupp_h3_comfui_vdn.sh` | VDN-H3 hybrid attention，默认 8-step DMD stage |
 | Cache | `scripts/setupp_h3_comfui_cache.sh` | Spectrum v0.2.27 / FirstBlockCache（含 Experimental deep-reuse） |
 | FastH3 | `scripts/setupp_h3_comfui_fasth3.sh` | 官方 FastH3 8-Step V2 + VSA-H3；工作台当前仅开放 T2VA |
-| Open Studio | `scripts/setupp_h3_studio.sh` | 原生 H3 + AntaresAlice/h3-webui；同时安装 Timeline Director 长视频能力 |
+| Open Studio | `scripts/setupp_h3_studio.sh` | 原生 H3 + AntaresAlice/h3-webui；同时安装 T8 曜石导演台与 Timeline Director |
 
 机器可读的 profile 元数据位于 `config/deployment_profiles.json`。`vast_workspace` 仍以应用 profile 为配置源，并实时发现 `scripts/` 下以 `setupp_h3_comfui` 开头的用户可选部署脚本；内部 `h3_comfui_base.sh` 不会进入部署列表。
 
@@ -199,7 +199,9 @@ H3 Studio    0.0.0.0:18080
 ```
 
 Studio 由 Supervisor 托管，环境变量把它指向同一 ComfyUI 的 input/output 目录。
-部署结束会强校验 Timeline Director 的核心节点
+部署结束会先校验 T8 曜石导演台的
+`MiniMaxH3DirectorProjectT8` 节点、`/minimax_h3_t8/director/ui` 页面以及
+`/minimax_h3_t8/director/capabilities` 能力清单，然后再强校验 Timeline Director 的核心节点
 `MiniMaxH3TimelinePlanner`、`MiniMaxH3FiniteSegmentSampler`、
 `MiniMaxH3TimelineSelfLiftSampler`，并确认 ASCII 别名 `h3_timeline_director` 能通过 ComfyUI
 `workflow_templates` API 被 URL 加载；随后再验证 Studio 首页以及
@@ -221,7 +223,7 @@ H3_INSTALL_TIMELINE_DIRECTOR=0 bash scripts/setupp_h3_studio.sh
 
 ### Open Studio release smoke
 
-部署完成后可以运行只读 smoke harness。默认模式**不会提交视频生成任务，也不会主动消耗 GPU 推理时间**，只检查 Studio、ComfyUI、Timeline Director 节点与工作流模板契约：
+部署完成后可以运行只读 smoke harness。默认模式**不会提交视频生成任务，也不会主动消耗 GPU 推理时间**，会检查 Studio、Studio→ComfyUI 桥接、T8 曜石导演台节点/UI/能力路由，以及 Timeline Director 节点与工作流模板契约：
 
 ```bash
 python scripts/h3_studio_smoke.py \
