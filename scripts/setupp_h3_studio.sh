@@ -337,6 +337,64 @@ h3_studio_start() {
 }
 
 
+h3_studio_verify_webui_node_contract() {
+  "$COMFY_PYTHON" - "http://127.0.0.1:$COMFY_PORT/object_info" <<'PY'
+import json
+import sys
+import urllib.request
+
+url = sys.argv[1]
+required = (
+    "VAELoader",
+    "CLIPLoader",
+    "UNETLoader",
+    "LoadImage",
+    "LoadAudio",
+    "LoadVideo",
+    "GetVideoComponents",
+    "RandomNoise",
+    "BasicGuider",
+    "KSamplerSelect",
+    "BasicScheduler",
+    "SamplerCustomAdvanced",
+    "LoraLoaderModelOnly",
+    "VAEDecode",
+    "VAEDecodeAudio",
+    "CreateVideo",
+    "SaveVideo",
+    "VHS_VideoCombine",
+    "MiniMaxChunkFeedForward",
+    "MiniMaxLowVRAMAttention",
+    "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "MiniMaxH3AudioConditioningT8",
+    "MiniMaxH3DualClockSamplerT8",
+    "MiniMaxH3AVDecodeT8",
+    "MiniMaxH3ReferenceToVideo",
+    "MiniMaxH3SigmaShift",
+)
+
+try:
+    with urllib.request.urlopen(url, timeout=30) as response:
+        catalog = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI object catalog for H3 Studio: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+missing = [name for name in required if name not in catalog]
+if missing:
+    print(
+        "[ERROR] H3 Studio required ComfyUI nodes are missing: " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print(
+    f"[OK] H3 Studio node contract is ready ({len(required)} required node classes)",
+    file=sys.stderr,
+)
+PY
+}
+
 h3_studio_verify_t8_director() {
   "$COMFY_PYTHON" - \
     "http://127.0.0.1:$COMFY_PORT/object_info" \
@@ -611,6 +669,7 @@ main_studio() {
   # Restart ComfyUI after the Studio-only custom nodes are installed, then
   # verify the advanced Timeline Director contract before starting the WebUI.
   h3_profile_finish
+  h3_studio_verify_webui_node_contract
   h3_studio_verify_t8_director
   h3_studio_verify_timeline_director
   h3_studio_write_supervisor_config
