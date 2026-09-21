@@ -203,7 +203,9 @@ H3 Studio    0.0.0.0:18080
 ```
 
 Studio 由 Supervisor 托管，环境变量把它指向同一 ComfyUI 的 input/output 目录。
-部署结束会先校验 T8 曜石导演台的
+部署结束会先通过 `/object_info` 校验 H3 Studio 实际生成图所需的完整节点集合，
+包括 T8 Conditioning/DualClock/AVDecode、Ref2VA、KJ 低显存节点、VHS 和 ComfyUI
+原生采样/视频节点；缺任一节点都不会标记 ready。随后校验 T8 曜石导演台的
 `MiniMaxH3DirectorProjectT8` 节点、`/minimax_h3_t8/director/ui` 页面以及
 `/minimax_h3_t8/director/capabilities` 能力清单，然后再强校验 Timeline Director 的核心节点
 `MiniMaxH3TimelinePlanner`、`MiniMaxH3FiniteSegmentSampler`、
@@ -227,7 +229,7 @@ H3_INSTALL_TIMELINE_DIRECTOR=0 bash scripts/setupp_h3_studio.sh
 
 ### Open Studio release smoke
 
-部署完成后可以运行只读 smoke harness。默认模式**不会提交视频生成任务，也不会主动消耗 GPU 推理时间**，会检查 Studio、Studio→ComfyUI 桥接、T8 曜石导演台节点/UI/能力路由，以及 Timeline Director 节点与工作流模板契约：
+部署完成后可以运行只读 smoke harness。默认模式**不会提交视频生成任务，也不会主动消耗 GPU 推理时间**，会检查 Studio、Studio→ComfyUI 桥接、Studio 完整节点合同、T8 曜石导演台节点/UI/能力路由，以及 Timeline Director 节点与工作流模板契约：
 
 ```bash
 python scripts/h3_studio_smoke.py \
