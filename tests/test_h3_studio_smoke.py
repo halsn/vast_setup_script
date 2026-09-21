@@ -65,6 +65,7 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
     assert '"VHS_VideoCombine"' in text
     assert 'T8_DIRECTOR_NODE = "MiniMaxH3DirectorProjectT8"' in text
     assert 'T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"' in text
+    assert 'T8_DIRECTOR_WORKBENCH = "/extensions/minimax-h3-audio-T8/director/workbench.mjs"' in text
     assert 'T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"' in text
     assert 'T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"' in text
     assert '"MiniMaxH3TimelinePlanner"' in text
@@ -120,6 +121,7 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
     timeline_clip = module["TIMELINE_CLIP"]
     required_studio_nodes = module["REQUIRED_STUDIO_NODES"]
     required_timeline_nodes = module["REQUIRED_TIMELINE_NODES"]
+    t8_workbench = module["T8_DIRECTOR_WORKBENCH"]
 
     variant = variants[timeline_model]
     timeline_unet = variant["unet"]
@@ -160,6 +162,10 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         "/minimax_h3_t8/director/ui": (
             "text/html; charset=utf-8",
             "<html><title>曜石导演台</title></html>".encode("utf-8"),
+        ),
+        t8_workbench: (
+            "text/javascript; charset=utf-8",
+            b"export function createDirectorWorkbench() {}",
         ),
         "/minimax_h3_t8/director/capabilities": (
             "application/json",
