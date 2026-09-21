@@ -156,8 +156,12 @@ H3_FASTH3_VARIANT=preview4 bash setupp_h3_comfui_fasth3.sh
 该上游代码采用 MIT License；部署固定到 commit
 `9a7206e502f876396d3ad8a61fab7cf3152ad5f5`，避免上游更新导致同一 profile 漂移。
 
-Studio 依赖的 T8 H3 双时钟/音频节点固定到
-`T8mars/comfyui-minimax-h3-audio-T8@b92b12f71a4eb0a9288cbbab26a3c05db9a1c433`。
+Studio 依赖的 T8 H3 运行时固定到
+`T8mars/comfyui-minimax-h3-audio-T8@2657a6ddf4143998be16d55d24fb03ac0cc5a794`。
+该 revision 除双时钟/音频节点外还包含 **曜石导演台**：项目、素材、镜头、顺序生成、
+双采样与 D3 能力入口都由 T8 自己维护，Vast Workspace 只通过 ComfyUI 路由承载其 UI。
+其根目录 `LICENSE` 明确声明 GPL-3.0-or-later；本项目按固定 revision 外部安装，
+不把 T8 源码复制进本仓库。
 
 同一 profile 还会安装
 [Songssx/ComfyUI-MiniMaxH3-TimelineDirector](https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector)
