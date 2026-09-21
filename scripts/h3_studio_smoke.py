@@ -33,6 +33,35 @@ TIMELINE_VARIANTS = {
         "steps": 20,
     },
 }
+REQUIRED_STUDIO_NODES = (
+    "VAELoader",
+    "CLIPLoader",
+    "UNETLoader",
+    "LoadImage",
+    "LoadAudio",
+    "LoadVideo",
+    "GetVideoComponents",
+    "RandomNoise",
+    "BasicGuider",
+    "KSamplerSelect",
+    "BasicScheduler",
+    "SamplerCustomAdvanced",
+    "LoraLoaderModelOnly",
+    "VAEDecode",
+    "VAEDecodeAudio",
+    "CreateVideo",
+    "SaveVideo",
+    "VHS_VideoCombine",
+    "MiniMaxChunkFeedForward",
+    "MiniMaxLowVRAMAttention",
+    "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "MiniMaxH3AudioConditioningT8",
+    "MiniMaxH3DualClockSamplerT8",
+    "MiniMaxH3AVDecodeT8",
+    "MiniMaxH3ReferenceToVideo",
+    "MiniMaxH3SigmaShift",
+)
+
 REQUIRED_TIMELINE_NODES = (
     "MiniMaxH3TimelinePlanner",
     "MiniMaxH3FiniteSegmentSampler",
@@ -95,18 +124,25 @@ def check_contract(
     variant = TIMELINE_VARIANTS[timeline_model]
     timeline_unet = str(variant["unet"])
     timeline_steps = int(variant["steps"])
-    print("[1/7] H3 Studio HTTP")
+    print("[1/8] H3 Studio HTTP")
     home = request(_url(studio_url, "/"))
     if home.status != 200:
         raise RuntimeError(f"Studio root returned HTTP {home.status}")
 
-    print("[2/7] H3 Studio -> ComfyUI bridge")
+    print("[2/8] H3 Studio -> ComfyUI bridge")
     status = request(_url(studio_url, "/api/comfyui/status")).json()
     if status.get("up") is not True:
         raise RuntimeError(f"Studio cannot reach ComfyUI: {status}")
 
-    print("[3/7] T8 Obsidian Director")
+    print("[3/8] H3 Studio node contract")
     catalog = request(_url(comfy_url, "/object_info"), timeout=30).json()
+    missing_studio = [name for name in REQUIRED_STUDIO_NODES if name not in catalog]
+    if missing_studio:
+        raise RuntimeError(
+            "H3 Studio required nodes are missing: " + ", ".join(missing_studio)
+        )
+
+    print("[4/8] T8 Obsidian Director")
     if T8_DIRECTOR_NODE not in catalog:
         raise RuntimeError(f"T8 Obsidian Director node is missing: {T8_DIRECTOR_NODE}")
     director_ui = request(_url(comfy_url, T8_DIRECTOR_UI))
@@ -122,7 +158,7 @@ def check_contract(
     if not capabilities.get("capabilities"):
         raise RuntimeError("T8 Obsidian Director capabilities inventory is empty")
 
-    print("[4/7] Timeline Director nodes")
+    print("[5/8] Timeline Director nodes")
     missing = [name for name in REQUIRED_TIMELINE_NODES if name not in catalog]
     if missing:
         raise RuntimeError(
@@ -145,7 +181,7 @@ def check_contract(
             f"Timeline Director CLIP is not selectable: {TIMELINE_CLIP}"
         )
 
-    print("[5/7] Timeline Director template catalog")
+    print("[6/8] Timeline Director template catalog")
     templates = request(_url(comfy_url, "/workflow_templates")).json()
     available = templates.get(TIMELINE_SOURCE) or []
     if TIMELINE_TEMPLATE not in available:
@@ -153,7 +189,7 @@ def check_contract(
             f"Template {TIMELINE_TEMPLATE!r} is not listed for {TIMELINE_SOURCE!r}"
         )
 
-    print("[6/7] Timeline Director template payload")
+    print("[7/8] Timeline Director template payload")
     path = (
         "/api/workflow_templates/"
         + urllib.parse.quote(TIMELINE_SOURCE, safe="")
@@ -190,7 +226,7 @@ def check_contract(
             f"Timeline Director scheduler mismatch: {scheduler_steps} != {[timeline_steps]}"
         )
 
-    print("[7/7] Cross-surface contract complete")
+    print("[8/8] Cross-surface contract complete")
     print("[OK] H3 Studio + T8 Director + Timeline Director contract smoke passed")
 
 
