@@ -19,6 +19,33 @@ SCHEMA = "h3.t8.smoke_job.v1"
 DEFAULT_ROOT = Path("/tmp/h3-t8-smoke-jobs")
 DEFAULT_SMOKE = "/usr/local/bin/h3-t8-long-video-smoke"
 JOB_RE = re.compile(r"^[0-9a-f]{32}$")
+EXPECTED_RUNTIME_IDENTITY = {
+    "t8_revision": "2657a6ddf4143998be16d55d24fb03ac0cc5a794",
+    "h3_model_revision": "0bd506d2e895983a9663037febda27aa3948cf48",
+    "models_verified": True,
+    "models": {
+        "unet": {
+            "relative_path": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "bytes": 20970379616,
+            "sha256": "e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a",
+        },
+        "clip": {
+            "relative_path": "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "bytes": 15687142551,
+            "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+        },
+        "video_vae": {
+            "relative_path": "vae/minimax_h3_video_vae_fp16.safetensors",
+            "bytes": 5207808496,
+            "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+        },
+        "audio_vae": {
+            "relative_path": "vae/minimax_h3_audio_vae_fp32.safetensors",
+            "bytes": 605254808,
+            "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+        },
+    },
+}
 
 
 def atomic_json(path: Path, value: dict) -> None:
@@ -74,6 +101,8 @@ def validate_paid_summary(summary: dict, chain_id: str) -> None:
         errors.append("qualification_id")
     if summary.get("chain_id") != chain_id:
         errors.append("chain_id")
+    if summary.get("runtime_identity") != EXPECTED_RUNTIME_IDENTITY:
+        errors.append("runtime_identity")
     if summary.get("manifest_revision") != 2:
         errors.append("manifest_revision")
     if summary.get("accepted_segments") != 2:
