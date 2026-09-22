@@ -16,6 +16,119 @@ def load_module():
     return module
 
 
+def test_runtime_identity_requires_pinned_clean_t8_checkout(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+
+    def capture(_root, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return module.T8_REVISION
+        if args and args[0] == "status":
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "_git_capture", capture)
+    identity = module.verify_runtime_identity(comfy, hash_models=False)
+    assert identity == {
+        "t8_revision": module.T8_REVISION,
+        "h3_model_revision": module.H3_MODEL_REVISION,
+        "models_verified": False,
+        "models": {},
+    }
+
+
+def test_runtime_identity_hashes_exact_paid_model_files(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+
+    def capture(_root, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return module.T8_REVISION
+        if args and args[0] == "status":
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "_git_capture", capture)
+    data = {
+        "unet": b"unet",
+        "clip": b"clip",
+        "video_vae": b"video",
+        "audio_vae": b"audio",
+    }
+    identities = {}
+    for name, value in data.items():
+        relative = f"test/{name}.bin"
+        target = comfy / "models" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(value)
+        identities[name] = {
+            "relative_path": relative,
+            "bytes": len(value),
+            "sha256": module.hashlib.sha256(value).hexdigest(),
+        }
+    monkeypatch.setattr(module, "MODEL_IDENTITIES", identities)
+
+    identity = module.verify_runtime_identity(comfy, hash_models=True)
+    assert identity["models_verified"] is True
+    assert identity["models"] == identities
+
+
+def test_runtime_identity_rejects_t8_revision_drift(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+    monkeypatch.setattr(
+        module,
+        "_git_capture",
+        lambda _root, *args: "0" * 40 if args[:2] == ("rev-parse", "HEAD") else "",
+    )
+
+    try:
+        module.verify_runtime_identity(comfy, hash_models=False)
+    except RuntimeError as exc:
+        assert "T8 revision mismatch" in str(exc)
+    else:
+        raise AssertionError("T8 revision drift must fail the release preflight")
+
+
+def test_runtime_identity_rejects_model_hash_mismatch(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+    monkeypatch.setattr(
+        module,
+        "_git_capture",
+        lambda _root, *args: module.T8_REVISION if args[:2] == ("rev-parse", "HEAD") else "",
+    )
+    target = comfy / "models" / "test/model.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"wrong")
+    monkeypatch.setattr(
+        module,
+        "MODEL_IDENTITIES",
+        {
+            "unet": {
+                "relative_path": "test/model.bin",
+                "bytes": 5,
+                "sha256": "0" * 64,
+            }
+        },
+    )
+
+    try:
+        module.verify_runtime_identity(comfy, hash_models=True)
+    except RuntimeError as exc:
+        assert "SHA-256 mismatch" in str(exc)
+    else:
+        raise AssertionError("model hash drift must fail the paid release preflight")
+
+
 def test_build_prompt_is_exact_two_segment_stock20_relay_eav():
     module = load_module()
     graph = module.build_prompt("release_smoke_test", 17)
