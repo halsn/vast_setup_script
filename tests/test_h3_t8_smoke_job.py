@@ -215,6 +215,21 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
     assert "recovered from completed smoke evidence" in first["message"]
 
 
+def test_paid_zero_exit_without_evidence_fails_closed(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    marker = tmp_path / "marker"
+    smoke = tmp_path / "smoke.py"
+    write_smoke(smoke, marker=marker)
+
+    job_id = "3" * 32
+    module.start(root, job_id, True, str(smoke))
+    terminal = wait_terminal(module, root, job_id)
+    assert terminal["state"] == "failed"
+    assert terminal["returncode"] == 74
+    assert "without atomic evidence" in terminal["message"]
+
+
 def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
     module = load_module()
     root = tmp_path / "jobs"
@@ -223,7 +238,11 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
     smoke.write_text(
         "#!/usr/bin/env python3\n"
         "import json, pathlib, sys\n"
-        f"pathlib.Path({str(argv_file)!r}).write_text(json.dumps(sys.argv[1:]))\n",
+        f"pathlib.Path({str(argv_file)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        "args = sys.argv[1:]\n"
+        "e = pathlib.Path(args[args.index('--evidence-dir') + 1])\n"
+        "e.mkdir(parents=True, exist_ok=True)\n"
+        "(e / 'result.json').write_text(json.dumps({'status':'passed','accepted_segments':2}))\n",
         encoding="utf-8",
     )
     smoke.chmod(0o755)
