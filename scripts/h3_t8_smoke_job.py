@@ -70,6 +70,8 @@ def validate_paid_summary(summary: dict, chain_id: str) -> None:
     errors: list[str] = []
     if summary.get("status") != "passed":
         errors.append("status")
+    if summary.get("qualification_id") != "h3.t8.stock20-relay-eav-8s.v1":
+        errors.append("qualification_id")
     if summary.get("chain_id") != chain_id:
         errors.append("chain_id")
     if summary.get("manifest_revision") != 2:
