@@ -7,6 +7,33 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "h3_t8_smoke_job.py"
+TEST_RUNTIME_IDENTITY = {
+    "t8_revision": "2657a6ddf4143998be16d55d24fb03ac0cc5a794",
+    "h3_model_revision": "0bd506d2e895983a9663037febda27aa3948cf48",
+    "models_verified": True,
+    "models": {
+        "unet": {
+            "relative_path": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "bytes": 20970379616,
+            "sha256": "e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a",
+        },
+        "clip": {
+            "relative_path": "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "bytes": 15687142551,
+            "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+        },
+        "video_vae": {
+            "relative_path": "vae/minimax_h3_video_vae_fp16.safetensors",
+            "bytes": 5207808496,
+            "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+        },
+        "audio_vae": {
+            "relative_path": "vae/minimax_h3_audio_vae_fp32.safetensors",
+            "bytes": 605254808,
+            "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+        },
+    },
+}
 
 
 def load_module():
@@ -32,6 +59,7 @@ def paid_summary(chain_id: str) -> dict:
         "status": "passed",
         "qualification_id": "h3.t8.stock20-relay-eav-8s.v1",
         "chain_id": chain_id,
+        "runtime_identity": TEST_RUNTIME_IDENTITY,
         "first_prompt_id": "prompt-first",
         "resume_prompt_id": "prompt-resume",
         "contract_sha256": "a" * 64,
@@ -321,6 +349,7 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
     root = tmp_path / "jobs"
     marker = tmp_path / "child-started"
     smoke = tmp_path / "slow-smoke.py"
+    runtime_json = json.dumps(TEST_RUNTIME_IDENTITY, separators=(",", ":"))
     smoke.write_text(
         "#!/usr/bin/env python3\n"
         "import argparse, json, pathlib, time\n"
@@ -334,6 +363,7 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
         "e = pathlib.Path(a.evidence_dir)\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
         "summary = {'status':'passed','qualification_id':'h3.t8.stock20-relay-eav-8s.v1','chain_id':a.chain_id,"
+        f"'runtime_identity':{runtime_json},"
         "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
         "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
         "'first_segment_unchanged_after_resume':True,"
@@ -394,6 +424,22 @@ def test_paid_review_receipt_rejects_path_traversal():
         raise AssertionError("review receipt path traversal must fail closed")
 
 
+def test_paid_evidence_rejects_runtime_identity_drift():
+    module = load_module()
+    chain_id = "wb_t8_" + ("4" * 20)
+    summary = paid_summary(chain_id)
+    summary["runtime_identity"] = {
+        **TEST_RUNTIME_IDENTITY,
+        "t8_revision": "0" * 40,
+    }
+    try:
+        module.validate_paid_summary(summary, chain_id)
+    except RuntimeError as exc:
+        assert "runtime_identity" in str(exc)
+    else:
+        raise AssertionError("runtime identity drift must fail closed")
+
+
 def test_paid_evidence_rejects_wrong_qualification_id():
     module = load_module()
     chain_id = "wb_t8_" + ("4" * 20)
@@ -440,6 +486,7 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
     root = tmp_path / "jobs"
     argv_file = tmp_path / "argv.json"
     smoke = tmp_path / "smoke.py"
+    runtime_json = json.dumps(TEST_RUNTIME_IDENTITY, separators=(",", ":"))
     smoke.write_text(
         "#!/usr/bin/env python3\n"
         "import json, pathlib, sys\n"
@@ -449,6 +496,7 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
         "e = pathlib.Path(args[args.index('--evidence-dir') + 1])\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
         "summary = {'status':'passed','qualification_id':'h3.t8.stock20-relay-eav-8s.v1','chain_id':chain,"
+        f"'runtime_identity':{runtime_json},"
         "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
         "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
         "'first_segment_unchanged_after_resume':True,"
