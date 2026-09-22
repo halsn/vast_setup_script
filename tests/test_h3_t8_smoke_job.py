@@ -1,6 +1,7 @@
 from pathlib import Path
 import importlib.util
 import json
+import os
 import time
 
 
@@ -94,6 +95,67 @@ def test_dead_runner_without_result_is_lost(tmp_path):
     value = module.status(root, job_id)
     assert value["state"] == "lost"
     assert "without an atomic result" in value["message"]
+
+
+def test_status_keeps_tracking_detached_smoke_child(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    job_id = "e" * 32
+    target = root / job_id
+    target.mkdir(parents=True)
+    module.atomic_json(
+        target / "request.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": job_id,
+            "execute": True,
+            "chain_id": "wb_t8_" + job_id[:20],
+            "evidence_dir": str(target / "evidence"),
+        },
+    )
+    (target / "pid").write_text("99999999\n", encoding="utf-8")
+    (target / "child_pid").write_text(str(os.getpid()) + "\n", encoding="utf-8")
+
+    value = module.status(root, job_id)
+    assert value["state"] == "running"
+    assert value["child_pid"] == os.getpid()
+    assert "detached smoke child" in value["message"]
+
+
+def test_status_recovers_passed_job_from_smoke_evidence(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    job_id = "f" * 32
+    target = root / job_id
+    evidence = target / "evidence"
+    evidence.mkdir(parents=True)
+    module.atomic_json(
+        target / "request.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": job_id,
+            "execute": True,
+            "chain_id": "wb_t8_" + job_id[:20],
+            "evidence_dir": str(evidence),
+        },
+    )
+    (target / "pid").write_text("99999998\n", encoding="utf-8")
+    (target / "child_pid").write_text("99999999\n", encoding="utf-8")
+    module.atomic_json(
+        evidence / "result.json",
+        {
+            "status": "passed",
+            "accepted_segments": 2,
+            "prompt_relay_applied_all_segments": True,
+            "eav_verified_all_segments": True,
+        },
+    )
+
+    value = module.status(root, job_id)
+    assert value["state"] == "completed"
+    assert value["returncode"] == 0
+    assert value["summary"]["accepted_segments"] == 2
+    assert "recovered from completed smoke evidence" in value["message"]
 
 
 def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
