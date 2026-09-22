@@ -7,6 +7,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "h3_t8_smoke_job.py"
+SMOKE_SCRIPT = ROOT / "scripts" / "h3_t8_long_video_smoke.py"
 TEST_RUNTIME_IDENTITY = {
     "t8_revision": "2657a6ddf4143998be16d55d24fb03ac0cc5a794",
     "h3_model_revision": "0bd506d2e895983a9663037febda27aa3948cf48",
@@ -42,6 +43,28 @@ def load_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def load_smoke_module():
+    spec = importlib.util.spec_from_file_location(
+        "h3_t8_long_video_smoke_contract_test",
+        SMOKE_SCRIPT,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_paid_runtime_identity_matches_smoke_runtime_contract():
+    job = load_module()
+    smoke = load_smoke_module()
+    expected = job.EXPECTED_RUNTIME_IDENTITY
+
+    assert expected["t8_revision"] == smoke.T8_REVISION
+    assert expected["h3_model_revision"] == smoke.H3_MODEL_REVISION
+    assert expected["models_verified"] is True
+    assert expected["models"] == smoke.MODEL_IDENTITIES
 
 
 def wait_terminal(module, root, job_id, timeout=5):
