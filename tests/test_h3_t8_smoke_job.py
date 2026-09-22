@@ -74,6 +74,43 @@ def test_existing_job_rejects_mode_change(tmp_path):
         raise AssertionError("same job id must not change execution mode")
 
 
+def test_existing_job_rejects_request_identity_mismatch(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    job_id = "9" * 32
+    target = root / job_id
+    target.mkdir(parents=True)
+    module.atomic_json(
+        target / "request.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": "8" * 32,
+            "execute": False,
+            "chain_id": "wb_t8_" + job_id[:20],
+            "evidence_dir": str(target / "evidence"),
+        },
+    )
+
+    try:
+        module.status(root, job_id)
+    except RuntimeError as exc:
+        assert "identity mismatch" in str(exc)
+    else:
+        raise AssertionError("mismatched durable job identity must be rejected")
+
+
+def test_tail_lines_is_bounded_without_loading_semantic_state(tmp_path):
+    module = load_module()
+    path = tmp_path / "job.log"
+    path.write_text(
+        "".join(f"line-{index}\n" for index in range(1000)),
+        encoding="utf-8",
+    )
+
+    assert module.tail_lines(path, 3) == ["line-997", "line-998", "line-999"]
+    assert module.tail_lines(path, 0) == []
+
+
 def test_dead_runner_without_result_is_lost(tmp_path):
     module = load_module()
     root = tmp_path / "jobs"
