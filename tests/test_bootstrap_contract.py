@@ -105,6 +105,42 @@ class BootstrapContractTests(unittest.TestCase):
     def test_model_size_validation_follows_legacy_cache_symlinks(self):
         self.assertIn("stat -Lc '%s'", self.base_text)
 
+    def test_official_h3_models_are_revision_pinned_and_sha_verified(self):
+        self.assertIn(
+            'H3_MODEL_REV="${H3_MODEL_REV:-0bd506d2e895983a9663037febda27aa3948cf48}"',
+            self.base_text,
+        )
+        expected = {
+            "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors": (
+                "20970379616",
+                "e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a",
+            ),
+            "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors": (
+                "20970379616",
+                "9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779",
+            ),
+            "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": (
+                "15687142551",
+                "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+            ),
+            "vae/minimax_h3_video_vae_fp16.safetensors": (
+                "5207808496",
+                "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+            ),
+            "vae/minimax_h3_audio_vae_fp32.safetensors": (
+                "605254808",
+                "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+            ),
+        }
+        for model_path, (size, digest) in expected.items():
+            self.assertIn(model_path, self.base_text)
+            self.assertIn(size, self.base_text)
+            self.assertIn(digest, self.base_text)
+        self.assertIn("model_file_matches_release", self.base_text)
+        self.assertIn("sha256sum", self.base_text)
+        self.assertIn("revision=revision", self.base_text)
+        self.assertIn("Removing model that does not match the pinned release identity", self.base_text)
+
     def test_bootstrap_pid_is_removed_after_process_exit(self):
         self.assertIn(
             'H3_BOOTSTRAP_PID_FILE="${H3_BOOTSTRAP_PID_FILE:-/run/h3/bootstrap.pid}"',
