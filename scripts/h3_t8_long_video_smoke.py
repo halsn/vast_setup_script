@@ -328,15 +328,25 @@ def verify_runtime_identity(
         raise RuntimeError(
             f"T8 revision mismatch: expected {T8_REVISION}, got {revision or 'empty'}"
         )
-    tracked_changes = _git_capture(
+    checkout_status = _git_capture(
         t8_root,
         "status",
         "--porcelain",
-        "--untracked-files=no",
+        "--untracked-files=all",
     )
-    if tracked_changes:
+    allowed_untracked = {
+        "?? example_workflows/h3_t8_long_video_relay.json",
+        "?? example_workflows/h3_t8_long_video_relay_smoke.json",
+    }
+    unexpected_changes = [
+        line
+        for line in checkout_status.splitlines()
+        if line and line not in allowed_untracked
+    ]
+    if unexpected_changes:
         raise RuntimeError(
-            "Pinned T8 checkout has tracked modifications; release qualification requires a clean checkout"
+            "Pinned T8 checkout contains unexpected tracked/untracked changes: "
+            + "; ".join(unexpected_changes[:20])
         )
 
     identity: dict[str, Any] = {
