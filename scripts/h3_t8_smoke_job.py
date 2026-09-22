@@ -43,7 +43,11 @@ def read_json(path: Path) -> dict:
     return value
 
 
-def validate_request(request: dict, job_id: str) -> None:
+def validate_request(
+    request: dict,
+    job_id: str,
+    target: Path | None = None,
+) -> None:
     if request.get("schema") != SCHEMA:
         raise RuntimeError("job request schema mismatch")
     if request.get("job_id") != job_id:
@@ -56,6 +60,10 @@ def validate_request(request: dict, job_id: str) -> None:
     evidence_dir = request.get("evidence_dir")
     if not isinstance(evidence_dir, str) or not evidence_dir:
         raise RuntimeError("job request evidence directory is invalid")
+    if target is not None:
+        expected = (target / "evidence").resolve()
+        if Path(evidence_dir).resolve() != expected:
+            raise RuntimeError("job request evidence directory escaped job root")
 
 
 def validate_paid_summary(summary: dict, chain_id: str) -> None:
@@ -185,7 +193,7 @@ def status(root: Path, job_id: str, tail: int = 80) -> dict:
             "log_tail": tail_lines(target / "job.log", tail),
         }
     request = read_json(request_path)
-    validate_request(request, job_id)
+    validate_request(request, job_id, target)
     result_path = target / "result.json"
 
     def read_pid(name: str) -> int | None:
@@ -212,6 +220,27 @@ def status(root: Path, job_id: str, tail: int = 80) -> dict:
     if result_path.is_file():
         final = read_json(result_path)
         result.update(final)
+        if bool(request.get("execute")) and result.get("state") == "completed":
+            summary = result.get("summary")
+            if not isinstance(summary, dict):
+                result.update(
+                    {
+                        "state": "failed",
+                        "returncode": 74,
+                        "message": "paid T8 smoke completed without evidence summary",
+                    }
+                )
+                return result
+            try:
+                validate_paid_summary(summary, str(request["chain_id"]))
+            except RuntimeError as exc:
+                result.update(
+                    {
+                        "state": "failed",
+                        "returncode": 74,
+                        "message": str(exc),
+                    }
+                )
         return result
 
     # If the controller died after launching the paid smoke, the smoke process
@@ -277,7 +306,7 @@ def write_result(target: Path, state: str, code: int, message: str, summary=None
 def run_job(root: Path, job_id: str) -> int:
     target = job_dir(root, job_id)
     request = read_json(target / "request.json")
-    validate_request(request, job_id)
+    validate_request(request, job_id, target)
     execute = bool(request["execute"])
     smoke = str(request["smoke_bin"])
     (target / "pid").write_text(str(os.getpid()) + "\n", encoding="utf-8")
@@ -362,7 +391,7 @@ def start(root: Path, job_id: str, execute: bool, smoke_bin: str) -> dict:
     target = job_dir(root, job_id)
     if target.exists():
         request = read_json(target / "request.json")
-        validate_request(request, job_id)
+        validate_request(request, job_id, target)
         if bool(request.get("execute")) is not bool(execute):
             raise RuntimeError("existing job id uses a different execution mode")
         return status(root, job_id)
