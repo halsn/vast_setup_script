@@ -48,6 +48,11 @@ def paid_summary(chain_id: str) -> dict:
             "duration_seconds": 8.0,
             "bytes": 4096,
             "sha256": "b" * 64,
+            "comfyui_view": {
+                "filename": "final.mp4",
+                "subfolder": "minimax_h3_t8_long_video/chain/assembled",
+                "type": "output",
+            },
         },
     }
 
@@ -333,7 +338,8 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
         "'first_segment_unchanged_after_resume':True,"
         "'prompt_relay_applied_all_segments':True,'eav_verified_all_segments':True,"
         "'media':{'frames':192,'fps':24,'width':512,'height':288,"
-        "'audio_streams':1,'duration_seconds':8.0,'bytes':4096,'sha256':'b'*64}}\n"
+        "'audio_streams':1,'duration_seconds':8.0,'bytes':4096,'sha256':'b'*64,"
+        "'comfyui_view':{'filename':'final.mp4','subfolder':'minimax_h3_t8_long_video/chain/assembled','type':'output'}}}\n"
         "(e / 'result.json').write_text(json.dumps(summary))\n",
         encoding="utf-8",
     )
@@ -372,6 +378,19 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
     assert first["state"] == "completed"
     assert first["summary"]["status"] == "passed"
     assert "recovered from completed smoke evidence" in first["message"]
+
+
+def test_paid_review_receipt_rejects_path_traversal():
+    module = load_module()
+    chain_id = "wb_t8_" + ("4" * 20)
+    summary = paid_summary(chain_id)
+    summary["media"]["comfyui_view"]["subfolder"] = "../outside"
+    try:
+        module.validate_paid_summary(summary, chain_id)
+    except RuntimeError as exc:
+        assert "media.comfyui_view.subfolder" in str(exc)
+    else:
+        raise AssertionError("review receipt path traversal must fail closed")
 
 
 def test_paid_partial_evidence_fails_closed(tmp_path):
@@ -421,7 +440,8 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
         "'first_segment_unchanged_after_resume':True,"
         "'prompt_relay_applied_all_segments':True,'eav_verified_all_segments':True,"
         "'media':{'frames':192,'fps':24,'width':512,'height':288,"
-        "'audio_streams':1,'duration_seconds':8.0,'bytes':4096,'sha256':'b'*64}}\n"
+        "'audio_streams':1,'duration_seconds':8.0,'bytes':4096,'sha256':'b'*64,"
+        "'comfyui_view':{'filename':'final.mp4','subfolder':'minimax_h3_t8_long_video/chain/assembled','type':'output'}}}\n"
         "(e / 'result.json').write_text(json.dumps(summary))\n",
         encoding="utf-8",
     )
