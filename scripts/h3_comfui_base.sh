@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-H3_BOOTSTRAP_VERSION="1.1.10"
-H3_MODEL_REPO="Comfy-Org/MiniMax-H3"
+H3_BOOTSTRAP_VERSION="1.1.11"
+H3_MODEL_REPO="${H3_MODEL_REPO:-Comfy-Org/MiniMax-H3}"
+H3_MODEL_REV="${H3_MODEL_REV:-0bd506d2e895983a9663037febda27aa3948cf48}"
 H3_STAGE="startup"
 H3_INSTALL_SAGE="${H3_INSTALL_SAGE:-1}"
 H3_SAGE_REQUIRED="${H3_SAGE_REQUIRED:-1}"
@@ -937,6 +938,40 @@ model_min_bytes() {
   esac
 }
 
+model_expected_bytes() {
+  local path="$1"
+  case "$path" in
+    diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors) printf '%s\n' 20970379616 ;;
+    diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors) printf '%s\n' 20970379616 ;;
+    text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors) printf '%s\n' 15687142551 ;;
+    vae/minimax_h3_video_vae_fp16.safetensors) printf '%s\n' 5207808496 ;;
+    vae/minimax_h3_audio_vae_fp32.safetensors) printf '%s\n' 605254808 ;;
+    *) return 1 ;;
+  esac
+}
+
+model_expected_sha256() {
+  local path="$1"
+  case "$path" in
+    diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors)
+      printf '%s\n' e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a
+      ;;
+    diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors)
+      printf '%s\n' 9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779
+      ;;
+    text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors)
+      printf '%s\n' 35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6
+      ;;
+    vae/minimax_h3_video_vae_fp16.safetensors)
+      printf '%s\n' 7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522
+      ;;
+    vae/minimax_h3_audio_vae_fp32.safetensors)
+      printf '%s\n' 8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 model_expected_gb() {
   local path="$1"
   case "$path" in
@@ -953,7 +988,7 @@ get_missing_model_disk_budget_gb() {
   local total=0 largest=0 file expected
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    if model_is_complete "$COMFY_DIR/models/$file" "$(model_min_bytes "$file")"; then
+    if model_size_matches_release "$COMFY_DIR/models/$file" "$file"; then
       continue
     fi
     expected="$(model_expected_gb "$file")"
@@ -975,11 +1010,32 @@ model_is_complete() {
   (( size >= min_bytes ))
 }
 
+model_size_matches_release() {
+  local path="$1" repo_path="$2" expected size
+  [[ -f "$path" ]] || return 1
+  expected="$(model_expected_bytes "$repo_path")" || return 1
+  size="$(stat -Lc '%s' "$path" 2>/dev/null || printf 0)"
+  [[ "$size" == "$expected" ]]
+}
+
+model_file_matches_release() {
+  local path="$1" repo_path="$2" expected_bytes expected_sha actual_sha
+  model_size_matches_release "$path" "$repo_path" || return 1
+  expected_bytes="$(model_expected_bytes "$repo_path")"
+  expected_sha="$(model_expected_sha256 "$repo_path")"
+  actual_sha="$(sha256sum "$path" | awk '{print $1}')"
+  if [[ "$actual_sha" != "$expected_sha" ]]; then
+    log_warn "Model SHA-256 mismatch: $repo_path expected=$expected_sha actual=$actual_sha bytes=$expected_bytes"
+    return 1
+  fi
+  return 0
+}
+
 get_missing_model_count() {
   local count=0 file
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    if ! model_is_complete "$COMFY_DIR/models/$file" "$(model_min_bytes "$file")"; then
+    if ! model_size_matches_release "$COMFY_DIR/models/$file" "$file"; then
       ((count+=1))
     fi
   done < <(model_manifest)
@@ -987,41 +1043,63 @@ get_missing_model_count() {
 }
 
 download_model_file() {
-  local repo_path="$1" min_bytes="${2:-$(model_min_bytes "$1")}" destination
+  local repo_path="$1" destination expected_bytes expected_sha
   destination="$COMFY_DIR/models/$repo_path"
+  expected_bytes="$(model_expected_bytes "$repo_path")"
+  expected_sha="$(model_expected_sha256 "$repo_path")"
   mkdir -p "$(dirname "$destination")"
-  if [[ "${H3_FORCE_REDOWNLOAD:-0}" != "1" ]] && model_is_complete "$destination" "$min_bytes"; then
-    log_ok "Model already present: $repo_path"
-    MODEL_STATUS+=("$repo_path:present")
+
+  if [[ "${H3_FORCE_REDOWNLOAD:-0}" != "1" ]] && model_file_matches_release "$destination" "$repo_path"; then
+    log_ok "Verified pinned model: $repo_path"
+    MODEL_STATUS+=("$repo_path:verified")
     return 0
   fi
-  if [[ -e "$destination" ]]; then
-    log_warn "Existing model will be replaced only after a verified download: $destination"
+
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    log_warn "Removing model that does not match the pinned release identity: $destination"
+    rm -f "$destination"
   fi
+
   local tmp_dir tmp_file
   tmp_dir="$(mktemp -d "$(dirname "$destination")/.h3-download.XXXXXX")"
   tmp_file="$tmp_dir/model.part"
-  log_info "Downloading $repo_path"
-  if ! "$COMFY_PYTHON" - "$H3_MODEL_REPO" "$repo_path" "$tmp_file" <<'PY'
-import os, sys
+  log_info "Downloading pinned model $repo_path @ $H3_MODEL_REV"
+  if ! "$COMFY_PYTHON" - "$H3_MODEL_REPO" "$H3_MODEL_REV" "$repo_path" "$tmp_file" <<'PY'
+import os
+import sys
 from huggingface_hub import hf_hub_download
-repo_id, filename, destination = sys.argv[1:]
+
+repo_id, revision, filename, destination = sys.argv[1:]
 work_dir = os.path.dirname(destination)
-source = hf_hub_download(repo_id=repo_id, filename=filename, local_dir=work_dir)
+source = hf_hub_download(
+    repo_id=repo_id,
+    revision=revision,
+    filename=filename,
+    local_dir=work_dir,
+)
 os.replace(source, destination)
 PY
   then
     rm -rf "$tmp_dir"
-    die "Model download failed: $repo_path"
+    die "Model download failed: $repo_path @ $H3_MODEL_REV"
   fi
-  if ! model_is_complete "$tmp_file" "$min_bytes"; then
+
+  local actual_bytes actual_sha
+  actual_bytes="$(stat -Lc '%s' "$tmp_file" 2>/dev/null || printf 0)"
+  if [[ "$actual_bytes" != "$expected_bytes" ]]; then
     rm -rf "$tmp_dir"
-    die "Downloaded model is missing or too small: $repo_path"
+    die "Downloaded model size mismatch for $repo_path: expected $expected_bytes, got $actual_bytes"
   fi
+  actual_sha="$(sha256sum "$tmp_file" | awk '{print $1}')"
+  if [[ "$actual_sha" != "$expected_sha" ]]; then
+    rm -rf "$tmp_dir"
+    die "Downloaded model SHA-256 mismatch for $repo_path: expected $expected_sha, got $actual_sha"
+  fi
+
   mv -f "$tmp_file" "$destination"
   rm -rf "$tmp_dir"
-  log_ok "Installed model: $repo_path"
-  MODEL_STATUS+=("$repo_path:downloaded")
+  log_ok "Installed verified pinned model: $repo_path"
+  MODEL_STATUS+=("$repo_path:downloaded-verified")
 }
 
 download_h3_models() {
@@ -1029,7 +1107,7 @@ download_h3_models() {
   local file
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    download_model_file "$file" "$(model_min_bytes "$file")"
+    download_model_file "$file"
   done < <(model_manifest)
 }
 
