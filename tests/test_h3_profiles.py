@@ -57,7 +57,7 @@ def test_cache_profile_owns_cache_implementation():
 
 def test_open_source_studio_profile_is_pinned_and_health_checked():
     text = (ROOT / STUDIO_SCRIPT).read_text()
-    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-6a7892e467d6b644c1267f233e7d556628aaa489}"' in text
+    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-708bed8034d80515a9df63e7a1f46bca96188cca}"' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py' in text
