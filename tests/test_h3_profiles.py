@@ -75,6 +75,8 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "h3_studio_install_t8_release_smoke_tool" in text
     assert "H3_T8_SMOKE_JOB_TOOL_URL" in text
     assert "H3_T8_SMOKE_JOB_BIN" in text
+    assert 'job_root="$COMFY_DIR/.h3-studio/t8-smoke-jobs"' in text
+    assert "--job-root $quoted_job_root" in text
     assert "h3-t8-smoke-job" in text
     assert "h3-t8-long-video-smoke --execute" in text
     assert "H3_T8_SMOKE_TOOL_URL" in text
