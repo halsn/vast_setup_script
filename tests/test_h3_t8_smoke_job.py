@@ -149,6 +149,40 @@ def test_job_request_rejects_evidence_path_outside_job_root(tmp_path):
         raise AssertionError("evidence path outside the durable job must be rejected")
 
 
+def test_existing_result_rejects_wrong_job_identity(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    job_id = "6" * 32
+    target = root / job_id
+    target.mkdir(parents=True)
+    module.atomic_json(
+        target / "request.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": job_id,
+            "execute": True,
+            "chain_id": "wb_t8_" + job_id[:20],
+            "evidence_dir": str(target / "evidence"),
+        },
+    )
+    module.atomic_json(
+        target / "result.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": "5" * 32,
+            "state": "completed",
+            "returncode": 0,
+            "message": "wrong job",
+            "summary": paid_summary("wb_t8_" + job_id[:20]),
+        },
+    )
+
+    value = module.status(root, job_id)
+    assert value["state"] == "failed"
+    assert value["returncode"] == 74
+    assert "result identity mismatch" in value["message"]
+
+
 def test_existing_completed_result_is_revalidated_before_reporting_success(tmp_path):
     module = load_module()
     root = tmp_path / "jobs"
