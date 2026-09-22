@@ -34,6 +34,7 @@ T8_NODE_REV="2657a6ddf4143998be16d55d24fb03ac0cc5a794"
 T8_TEMPLATE_SOURCE_NAME="$T8_NODE_NAME"
 T8_LONG_VIDEO_TEMPLATE_SOURCE="examples/workflows/04-long-video/2026-08-27_H3_In_Node_Long_Video_Prompt_Relay_EAV_Stock20_Advanced_EXP.json"
 T8_LONG_VIDEO_TEMPLATE_ALIAS="h3_t8_long_video_relay"
+T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS="h3_t8_long_video_relay_smoke"
 T8_LONG_VIDEO_UNET_NAME="minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 T8_LONG_VIDEO_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 
@@ -102,54 +103,177 @@ h3_studio_install_t8_long_video_template() {
   local target="$COMFY_DIR/custom_nodes/$T8_NODE_NAME"
   local source_template="$target/$T8_LONG_VIDEO_TEMPLATE_SOURCE"
   local template_dir="$target/example_workflows"
-  local alias_template="$template_dir/$T8_LONG_VIDEO_TEMPLATE_ALIAS.json"
+  local standard_template="$template_dir/$T8_LONG_VIDEO_TEMPLATE_ALIAS.json"
+  local smoke_template="$template_dir/$T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS.json"
 
   [[ -f "$source_template" ]] || {
     h3_profile_error "T8 Long Video + Prompt Relay source workflow is missing: $source_template"
     return 1
   }
   mkdir -p "$template_dir"
-  cp -f "$source_template" "$alias_template"
+  cp -f "$source_template" "$standard_template"
+  cp -f "$source_template" "$smoke_template"
 
   "$COMFY_PYTHON" - \
-    "$alias_template" \
+    "$standard_template" \
+    "$smoke_template" \
     "$T8_LONG_VIDEO_UNET_NAME" \
     "$T8_LONG_VIDEO_CLIP_NAME" <<'PY'
 import json
+import os
 import sys
+import tempfile
 
-path, unet_name, clip_name = sys.argv[1:]
-with open(path, encoding="utf-8") as handle:
-    workflow = json.load(handle)
+standard_path, smoke_path, unet_name, clip_name = sys.argv[1:]
 
-node_types = {
-    str(node.get("type"))
-    for node in workflow.get("nodes", [])
-    if isinstance(node, dict)
+
+def load(path):
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def nodes_by_type(workflow):
+    return {
+        str(node.get("type")): node
+        for node in workflow.get("nodes", [])
+        if isinstance(node, dict)
+    }
+
+
+def validate_base(workflow, label):
+    by_type = nodes_by_type(workflow)
+    required = {
+        "MiniMaxH3PromptRelayPlanT8Advanced",
+        "MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced",
+    }
+    missing = sorted(required - set(by_type))
+    if missing:
+        raise SystemExit(
+            f"{label} is missing required T8 nodes: " + ", ".join(missing)
+        )
+    serialized = json.dumps(workflow, ensure_ascii=False)
+    for expected in (unet_name, clip_name):
+        if expected not in serialized:
+            raise SystemExit(
+                f"{label} does not reference installed model: {expected}"
+            )
+    return by_type
+
+
+standard = load(standard_path)
+standard_nodes = validate_base(standard, "T8 standard long-video alias")
+
+# Build a cheap but meaningful release preset from the pinned upstream graph:
+# 8.0s @ 24fps = 192 final frames. With a 124-frame render window and 22-frame
+# context this crosses one seam (124 + 68 new frames), so it exercises long-video
+# continuation/Relay while avoiding the 30s demo's cost.
+smoke = load(smoke_path)
+smoke_nodes = validate_base(smoke, "T8 smoke long-video alias")
+relay = smoke_nodes["MiniMaxH3PromptRelayPlanT8Advanced"]
+runner = smoke_nodes["MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced"]
+relay_values = relay.get("widgets_values")
+runner_values = runner.get("widgets_values")
+if not isinstance(relay_values, list) or len(relay_values) < 3:
+    raise SystemExit("T8 smoke alias Relay widget contract changed")
+if not isinstance(runner_values, list) or len(runner_values) < 43:
+    raise SystemExit("T8 smoke alias long-video widget contract changed")
+
+expected_source = {
+    "relay_frames": 720,
+    "chain_id": "h3_in_node_relay_eav_stock20_demo",
+    "duration": 30.0,
+    "width": 736,
+    "height": 416,
+    "render_window": 124,
+    "context": 22,
+    "relay_mode": "apply_exp",
+    "eav_mode": "apply_exp",
+    "steps": 20,
 }
-required = {
-    "MiniMaxH3PromptRelayPlanT8Advanced",
-    "MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced",
+actual_source = {
+    "relay_frames": relay_values[2],
+    "chain_id": runner_values[0],
+    "duration": runner_values[1],
+    "width": runner_values[2],
+    "height": runner_values[3],
+    "render_window": runner_values[4],
+    "context": runner_values[5],
+    "relay_mode": runner_values[8],
+    "eav_mode": runner_values[10],
+    "steps": runner_values[19],
 }
-missing = sorted(required - node_types)
-if missing:
+if actual_source != expected_source:
     raise SystemExit(
-        "T8 Long Video + Prompt Relay alias is missing required nodes: "
-        + ", ".join(missing)
+        "Pinned T8 source workflow widget contract changed; refusing to build smoke preset: "
+        + repr(actual_source)
     )
 
-serialized = json.dumps(workflow, ensure_ascii=False)
-for expected in (unet_name, clip_name):
-    if expected not in serialized:
-        raise SystemExit(
-            "T8 Long Video + Prompt Relay alias does not reference installed model: "
-            + expected
-        )
+relay_values[2] = 192
+runner_values[0] = "h3_t8_relay_smoke_8s"
+runner_values[1] = 8.0
+runner_values[2] = 512
+runner_values[3] = 288
+runner_values[37] = "H3_T8_Relay_Smoke_8s"
+relay["title"] = "5. Global Prompt Relay · 8s / 192-frame validation timeline"
+runner["title"] = "6. Validation preset · 8s 512x288 · 2 segments · Stock20 + Relay + EAV"
+
+for node in smoke.get("nodes", []):
+    if node.get("type") != "MarkdownNote":
+        continue
+    title = str(node.get("title", ""))
+    if title.startswith("NOTE 1"):
+        node["widgets_values"] = [
+            "## 8秒低成本验证预设\n"
+            "192帧@24fps；固定124帧窗口 + 22帧上下文会生成2段（124 + 68新帧），"
+            "因此仍会真实经过一次长视频接缝。Prompt Relay全局Plan长度已同步为192帧。"
+            "验证通过后再切换30秒标准模板。"
+        ]
+        break
+
+with tempfile.NamedTemporaryFile(
+    "w", encoding="utf-8", dir=os.path.dirname(smoke_path), delete=False
+) as handle:
+    json.dump(smoke, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+    temporary = handle.name
+os.replace(temporary, smoke_path)
+
+# Re-read the generated preset to make the release contract explicit.
+smoke_check = load(smoke_path)
+check_nodes = validate_base(smoke_check, "generated T8 smoke preset")
+relay_check = check_nodes["MiniMaxH3PromptRelayPlanT8Advanced"]["widgets_values"]
+runner_check = check_nodes["MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced"]["widgets_values"]
+expected_smoke = {
+    "relay_frames": 192,
+    "chain_id": "h3_t8_relay_smoke_8s",
+    "duration": 8.0,
+    "width": 512,
+    "height": 288,
+    "render_window": 124,
+    "context": 22,
+    "relay_mode": "apply_exp",
+    "eav_mode": "apply_exp",
+    "steps": 20,
+}
+actual_smoke = {
+    "relay_frames": relay_check[2],
+    "chain_id": runner_check[0],
+    "duration": runner_check[1],
+    "width": runner_check[2],
+    "height": runner_check[3],
+    "render_window": runner_check[4],
+    "context": runner_check[5],
+    "relay_mode": runner_check[8],
+    "eav_mode": runner_check[10],
+    "steps": runner_check[19],
+}
+if actual_smoke != expected_smoke:
+    raise SystemExit("Generated T8 smoke preset contract mismatch: " + repr(actual_smoke))
 PY
 
-  h3_profile_info "T8 Long Video + Prompt Relay URL template alias installed: $T8_LONG_VIDEO_TEMPLATE_ALIAS"
+  h3_profile_info "T8 standard template installed: $T8_LONG_VIDEO_TEMPLATE_ALIAS (30s 736x416 Stock20)."
+  h3_profile_info "T8 validation template installed: $T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS (8s 512x288, 2 segments)."
 }
-
 h3_studio_configure_timeline_model() {
   case "$H3_TIMELINE_MODEL_VARIANT" in
     fused)
@@ -538,6 +662,7 @@ h3_studio_verify_t8_long_video_template() {
     "http://127.0.0.1:$COMFY_PORT/api/workflow_templates" \
     "$T8_TEMPLATE_SOURCE_NAME" \
     "$T8_LONG_VIDEO_TEMPLATE_ALIAS" \
+    "$T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS" \
     "$T8_LONG_VIDEO_UNET_NAME" \
     "$T8_LONG_VIDEO_CLIP_NAME" <<'PY'
 import json
@@ -550,14 +675,17 @@ import urllib.request
     templates_url,
     template_base_url,
     source,
-    template,
+    standard_template,
+    smoke_template,
     unet_name,
     clip_name,
 ) = sys.argv[1:]
 
+
 def read_json(url):
     with urllib.request.urlopen(url, timeout=20) as response:
         return json.load(response)
+
 
 catalog = read_json(object_info_url)
 required_nodes = (
@@ -575,52 +703,92 @@ if missing:
 
 templates = read_json(templates_url)
 available = templates.get(source) or []
-if template not in available:
-    print(
-        f"[ERROR] T8 engine template '{template}' is not listed for source '{source}'.",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-
-template_url = (
-    template_base_url.rstrip("/")
-    + "/"
-    + urllib.parse.quote(source, safe="")
-    + "/"
-    + urllib.parse.quote(template + ".json", safe="")
-)
-payload = read_json(template_url)
-if not isinstance(payload, dict) or not payload.get("nodes"):
-    print("[ERROR] T8 Long Video + Prompt Relay template JSON is invalid.", file=sys.stderr)
-    raise SystemExit(1)
-
-types = {
-    str(node.get("type"))
-    for node in payload.get("nodes", [])
-    if isinstance(node, dict)
-}
-missing_payload = [name for name in required_nodes if name not in types]
-if missing_payload:
-    print(
-        "[ERROR] T8 Long Video + Prompt Relay template payload is missing: "
-        + ", ".join(missing_payload),
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-
-serialized = json.dumps(payload, ensure_ascii=False)
-for expected in (unet_name, clip_name):
-    if expected not in serialized:
+for template in (standard_template, smoke_template):
+    if template not in available:
         print(
-            f"[ERROR] T8 Long Video + Prompt Relay template does not use installed model: {expected}",
+            f"[ERROR] T8 engine template '{template}' is not listed for source '{source}'.",
             file=sys.stderr,
         )
         raise SystemExit(1)
 
-print("[OK] T8 Long Video + Prompt Relay URL template is ready", file=sys.stderr)
+
+def load_template(template):
+    template_url = (
+        template_base_url.rstrip("/")
+        + "/"
+        + urllib.parse.quote(source, safe="")
+        + "/"
+        + urllib.parse.quote(template + ".json", safe="")
+    )
+    payload = read_json(template_url)
+    if not isinstance(payload, dict) or not payload.get("nodes"):
+        raise RuntimeError(f"T8 template {template!r} JSON is invalid")
+    types = {
+        str(node.get("type"))
+        for node in payload.get("nodes", [])
+        if isinstance(node, dict)
+    }
+    missing_payload = [name for name in required_nodes if name not in types]
+    if missing_payload:
+        raise RuntimeError(
+            f"T8 template {template!r} is missing nodes: " + ", ".join(missing_payload)
+        )
+    serialized = json.dumps(payload, ensure_ascii=False)
+    for expected in (unet_name, clip_name):
+        if expected not in serialized:
+            raise RuntimeError(
+                f"T8 template {template!r} does not use installed model: {expected}"
+            )
+    return payload
+
+
+standard = load_template(standard_template)
+smoke = load_template(smoke_template)
+
+by_type = {
+    str(node.get("type")): node
+    for node in smoke.get("nodes", [])
+    if isinstance(node, dict)
+}
+relay_values = by_type["MiniMaxH3PromptRelayPlanT8Advanced"].get("widgets_values") or []
+runner_values = by_type["MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced"].get("widgets_values") or []
+actual = {
+    "relay_frames": relay_values[2] if len(relay_values) > 2 else None,
+    "chain_id": runner_values[0] if len(runner_values) > 0 else None,
+    "duration": runner_values[1] if len(runner_values) > 1 else None,
+    "width": runner_values[2] if len(runner_values) > 2 else None,
+    "height": runner_values[3] if len(runner_values) > 3 else None,
+    "render_window": runner_values[4] if len(runner_values) > 4 else None,
+    "context": runner_values[5] if len(runner_values) > 5 else None,
+    "relay_mode": runner_values[8] if len(runner_values) > 8 else None,
+    "eav_mode": runner_values[10] if len(runner_values) > 10 else None,
+    "steps": runner_values[19] if len(runner_values) > 19 else None,
+}
+expected = {
+    "relay_frames": 192,
+    "chain_id": "h3_t8_relay_smoke_8s",
+    "duration": 8.0,
+    "width": 512,
+    "height": 288,
+    "render_window": 124,
+    "context": 22,
+    "relay_mode": "apply_exp",
+    "eav_mode": "apply_exp",
+    "steps": 20,
+}
+if actual != expected:
+    print(
+        "[ERROR] T8 8s validation preset contract mismatch: " + repr(actual),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print(
+    "[OK] T8 standard 30s template + 8s two-segment validation preset are ready",
+    file=sys.stderr,
+)
 PY
 }
-
 h3_studio_verify_timeline_director() {
   if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" ]]; then
     return 0

@@ -74,6 +74,7 @@ T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"
 T8_STUDIO_ENGINE_CAPABILITIES = ("long_video", "prompt_relay")
 T8_TEMPLATE_SOURCE = "comfyui-minimax-h3-audio-T8"
 T8_LONG_VIDEO_TEMPLATE = "h3_t8_long_video_relay"
+T8_LONG_VIDEO_SMOKE_TEMPLATE = "h3_t8_long_video_relay_smoke"
 T8_LONG_VIDEO_UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 T8_LONG_VIDEO_CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 REQUIRED_T8_LONG_VIDEO_NODES = (
@@ -185,36 +186,73 @@ def check_contract(
     print("[5/9] T8 Long Video + Prompt Relay template")
     templates = request(_url(comfy_url, "/workflow_templates")).json()
     t8_available = templates.get(T8_TEMPLATE_SOURCE) or []
-    if T8_LONG_VIDEO_TEMPLATE not in t8_available:
-        raise RuntimeError(
-            f"Template {T8_LONG_VIDEO_TEMPLATE!r} is not listed for {T8_TEMPLATE_SOURCE!r}"
+    for template in (T8_LONG_VIDEO_TEMPLATE, T8_LONG_VIDEO_SMOKE_TEMPLATE):
+        if template not in t8_available:
+            raise RuntimeError(
+                f"Template {template!r} is not listed for {T8_TEMPLATE_SOURCE!r}"
+            )
+
+    def load_t8_template(template: str) -> dict[str, Any]:
+        path = (
+            "/api/workflow_templates/"
+            + urllib.parse.quote(T8_TEMPLATE_SOURCE, safe="")
+            + "/"
+            + urllib.parse.quote(template + ".json", safe="")
         )
-    t8_path = (
-        "/api/workflow_templates/"
-        + urllib.parse.quote(T8_TEMPLATE_SOURCE, safe="")
-        + "/"
-        + urllib.parse.quote(T8_LONG_VIDEO_TEMPLATE + ".json", safe="")
-    )
-    t8_workflow = request(_url(comfy_url, t8_path)).json()
-    if not isinstance(t8_workflow, dict) or not t8_workflow.get("nodes"):
-        raise RuntimeError("T8 Long Video + Prompt Relay template JSON is missing workflow nodes")
-    t8_types = {
-        str(node.get("type"))
-        for node in t8_workflow.get("nodes", [])
+        workflow = request(_url(comfy_url, path)).json()
+        if not isinstance(workflow, dict) or not workflow.get("nodes"):
+            raise RuntimeError(f"T8 template {template!r} JSON is missing workflow nodes")
+        types = {
+            str(node.get("type"))
+            for node in workflow.get("nodes", [])
+            if isinstance(node, dict)
+        }
+        missing = [name for name in REQUIRED_T8_LONG_VIDEO_NODES if name not in types]
+        if missing:
+            raise RuntimeError(
+                f"T8 template {template!r} is missing nodes: " + ", ".join(missing)
+            )
+        serialized = json.dumps(workflow, ensure_ascii=False)
+        for expected in (T8_LONG_VIDEO_UNET, T8_LONG_VIDEO_CLIP):
+            if expected not in serialized:
+                raise RuntimeError(
+                    f"T8 template {template!r} does not use installed model: {expected}"
+                )
+        return workflow
+
+    load_t8_template(T8_LONG_VIDEO_TEMPLATE)
+    t8_smoke = load_t8_template(T8_LONG_VIDEO_SMOKE_TEMPLATE)
+    smoke_nodes = {
+        str(node.get("type")): node
+        for node in t8_smoke.get("nodes", [])
         if isinstance(node, dict)
     }
-    missing_t8 = [name for name in REQUIRED_T8_LONG_VIDEO_NODES if name not in t8_types]
-    if missing_t8:
+    relay_values = smoke_nodes["MiniMaxH3PromptRelayPlanT8Advanced"].get("widgets_values") or []
+    runner_values = smoke_nodes["MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced"].get("widgets_values") or []
+    smoke_contract = {
+        "relay_frames": relay_values[2] if len(relay_values) > 2 else None,
+        "chain_id": runner_values[0] if len(runner_values) > 0 else None,
+        "duration": runner_values[1] if len(runner_values) > 1 else None,
+        "width": runner_values[2] if len(runner_values) > 2 else None,
+        "height": runner_values[3] if len(runner_values) > 3 else None,
+        "render_window": runner_values[4] if len(runner_values) > 4 else None,
+        "context": runner_values[5] if len(runner_values) > 5 else None,
+        "steps": runner_values[19] if len(runner_values) > 19 else None,
+    }
+    expected_smoke = {
+        "relay_frames": 192,
+        "chain_id": "h3_t8_relay_smoke_8s",
+        "duration": 8.0,
+        "width": 512,
+        "height": 288,
+        "render_window": 124,
+        "context": 22,
+        "steps": 20,
+    }
+    if smoke_contract != expected_smoke:
         raise RuntimeError(
-            "T8 Long Video + Prompt Relay template is missing nodes: "
-            + ", ".join(missing_t8)
+            "T8 8s validation preset contract mismatch: " + repr(smoke_contract)
         )
-    t8_serialized = json.dumps(t8_workflow, ensure_ascii=False)
-    for expected in (T8_LONG_VIDEO_UNET, T8_LONG_VIDEO_CLIP):
-        if expected not in t8_serialized:
-            raise RuntimeError(
-                f"T8 Long Video + Prompt Relay template does not use installed model: {expected}"
-            )
 
     print("[6/9] Timeline Director nodes")
     missing = [name for name in REQUIRED_TIMELINE_NODES if name not in catalog]
