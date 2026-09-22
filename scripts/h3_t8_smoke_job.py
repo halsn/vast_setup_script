@@ -219,6 +219,15 @@ def status(root: Path, job_id: str, tail: int = 80) -> dict:
     }
     if result_path.is_file():
         final = read_json(result_path)
+        if final.get("schema") != SCHEMA or final.get("job_id") != job_id:
+            result.update(
+                {
+                    "state": "failed",
+                    "returncode": 74,
+                    "message": "durable T8 smoke result identity mismatch",
+                }
+            )
+            return result
         result.update(final)
         if bool(request.get("execute")) and result.get("state") == "completed":
             summary = result.get("summary")
