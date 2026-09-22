@@ -96,12 +96,18 @@ def status(root: Path, job_id: str, tail: int = 80) -> dict:
         }
     request = read_json(request_path)
     result_path = target / "result.json"
-    pid = None
-    if (target / "pid").is_file():
+
+    def read_pid(name: str) -> int | None:
+        path = target / name
+        if not path.is_file():
+            return None
         try:
-            pid = int((target / "pid").read_text(encoding="utf-8").strip())
-        except ValueError:
-            pid = None
+            return int(path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return None
+
+    pid = read_pid("pid")
+    child_pid = read_pid("child_pid")
     result = {
         "schema": SCHEMA,
         "job_id": job_id,
@@ -109,15 +115,45 @@ def status(root: Path, job_id: str, tail: int = 80) -> dict:
         "chain_id": request.get("chain_id"),
         "evidence_dir": request.get("evidence_dir"),
         "pid": pid,
+        "child_pid": child_pid,
         "log_tail": tail_lines(target / "job.log", tail),
     }
     if result_path.is_file():
         final = read_json(result_path)
         result.update(final)
         return result
+
+    # If the controller died after launching the paid smoke, the smoke process
+    # remains detached and inherits the paid-job lock fd. Keep attaching to that
+    # child instead of allowing the UI to start a replacement job.
+    if alive(child_pid):
+        result["state"] = "running"
+        if not alive(pid):
+            result["message"] = "controller exited; detached smoke child is still running"
+        return result
+
+    # The smoke harness writes its own atomic evidence result before returning.
+    # This lets status recover a completed paid run even if the tiny controller
+    # process died in the narrow window before it could publish job/result.json.
+    evidence_dir = request.get("evidence_dir")
+    if bool(request.get("execute")) and isinstance(evidence_dir, str):
+        evidence_result = Path(evidence_dir) / "result.json"
+        if evidence_result.is_file():
+            summary = read_json(evidence_result)
+            if summary.get("status") == "passed":
+                result.update(
+                    {
+                        "state": "completed",
+                        "returncode": 0,
+                        "message": "T8 validation recovered from completed smoke evidence",
+                        "summary": summary,
+                    }
+                )
+                return result
+
     result["state"] = "running" if alive(pid) else ("starting" if pid is None else "lost")
     if result["state"] == "lost":
-        result["message"] = "runner exited without an atomic result"
+        result["message"] = "runner exited without an atomic result or completed evidence"
     return result
 
 
@@ -162,22 +198,34 @@ def run_job(root: Path, job_id: str) -> int:
                     "--evidence-dir",
                     str(request["evidence_dir"]),
                 ]
-            completed = subprocess.run(
+            inherited_fds = (lock.fileno(),) if lock is not None else ()
+            child = subprocess.Popen(
                 command,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
-                check=False,
+                start_new_session=True,
+                close_fds=True,
+                pass_fds=inherited_fds,
             )
+            (target / "child_pid").write_text(
+                str(child.pid) + "\n",
+                encoding="utf-8",
+            )
+            returncode = int(child.wait())
             summary = None
             evidence = Path(str(request["evidence_dir"])) / "result.json"
-            if execute and completed.returncode == 0 and evidence.is_file():
+            if execute and returncode == 0 and evidence.is_file():
                 summary = read_json(evidence)
-            state = "completed" if completed.returncode == 0 else "failed"
-            message = "T8 validation completed" if state == "completed" else f"T8 validation exited with code {completed.returncode}"
-            write_result(target, state, completed.returncode, message, summary)
+            state = "completed" if returncode == 0 else "failed"
+            message = (
+                "T8 validation completed"
+                if state == "completed"
+                else f"T8 validation exited with code {returncode}"
+            )
+            write_result(target, state, returncode, message, summary)
             print(f"[JOB] {message}", file=log, flush=True)
-            return int(completed.returncode)
+            return returncode
     except BaseException as exc:
         write_result(target, "failed", 70, f"{type(exc).__name__}: {exc}")
         raise
