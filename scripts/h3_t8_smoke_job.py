@@ -58,6 +58,76 @@ def validate_request(request: dict, job_id: str) -> None:
         raise RuntimeError("job request evidence directory is invalid")
 
 
+def validate_paid_summary(summary: dict, chain_id: str) -> None:
+    errors: list[str] = []
+    if summary.get("status") != "passed":
+        errors.append("status")
+    if summary.get("chain_id") != chain_id:
+        errors.append("chain_id")
+    if summary.get("manifest_revision") != 2:
+        errors.append("manifest_revision")
+    if summary.get("accepted_segments") != 2:
+        errors.append("accepted_segments")
+    for name in (
+        "first_segment_unchanged_after_resume",
+        "prompt_relay_applied_all_segments",
+        "eav_verified_all_segments",
+    ):
+        if summary.get(name) is not True:
+            errors.append(name)
+
+    contract = summary.get("contract_sha256")
+    if (
+        not isinstance(contract, str)
+        or len(contract) != 64
+        or any(char not in "0123456789abcdef" for char in contract.lower())
+    ):
+        errors.append("contract_sha256")
+    first_prompt = summary.get("first_prompt_id")
+    resume_prompt = summary.get("resume_prompt_id")
+    if not isinstance(first_prompt, str) or not first_prompt:
+        errors.append("first_prompt_id")
+    if (
+        not isinstance(resume_prompt, str)
+        or not resume_prompt
+        or resume_prompt == first_prompt
+    ):
+        errors.append("resume_prompt_id")
+
+    media = summary.get("media")
+    if not isinstance(media, dict):
+        errors.append("media")
+    else:
+        expected = {
+            "frames": 192,
+            "fps": 24,
+            "width": 512,
+            "height": 288,
+            "audio_streams": 1,
+        }
+        for name, value in expected.items():
+            if media.get(name) != value:
+                errors.append("media." + name)
+        media_hash = media.get("sha256")
+        if (
+            not isinstance(media_hash, str)
+            or len(media_hash) != 64
+            or any(char not in "0123456789abcdef" for char in media_hash.lower())
+        ):
+            errors.append("media.sha256")
+        media_bytes = media.get("bytes")
+        if not isinstance(media_bytes, int) or media_bytes < 1024:
+            errors.append("media.bytes")
+        duration = media.get("duration_seconds")
+        if not isinstance(duration, (int, float)) or abs(float(duration) - 8.0) > 0.1:
+            errors.append("media.duration_seconds")
+
+    if errors:
+        raise RuntimeError(
+            "paid T8 smoke evidence contract mismatch: " + ", ".join(errors)
+        )
+
+
 def job_dir(root: Path, job_id: str) -> Path:
     if not JOB_RE.fullmatch(job_id):
         raise ValueError("job id must be 32 lowercase hex characters")
@@ -161,16 +231,27 @@ def status(root: Path, job_id: str, tail: int = 80) -> dict:
         evidence_result = Path(evidence_dir) / "result.json"
         if evidence_result.is_file():
             summary = read_json(evidence_result)
-            if summary.get("status") == "passed":
+            try:
+                validate_paid_summary(summary, str(request["chain_id"]))
+            except RuntimeError as exc:
                 result.update(
                     {
-                        "state": "completed",
-                        "returncode": 0,
-                        "message": "T8 validation recovered from completed smoke evidence",
+                        "state": "failed",
+                        "returncode": 74,
+                        "message": str(exc),
                         "summary": summary,
                     }
                 )
                 return result
+            result.update(
+                {
+                    "state": "completed",
+                    "returncode": 0,
+                    "message": "T8 validation recovered from completed smoke evidence",
+                    "summary": summary,
+                }
+            )
+            return result
 
     result["state"] = "running" if alive(pid) else ("starting" if pid is None else "lost")
     if result["state"] == "lost":
@@ -247,9 +328,11 @@ def run_job(root: Path, job_id: str) -> int:
                     print(f"[JOB] {message}", file=log, flush=True)
                     return returncode
                 summary = read_json(evidence)
-                if summary.get("status") != "passed":
+                try:
+                    validate_paid_summary(summary, str(request["chain_id"]))
+                except RuntimeError as exc:
                     returncode = 74
-                    message = "paid T8 smoke evidence did not report status=passed"
+                    message = str(exc)
                     write_result(target, "failed", returncode, message, summary)
                     print(f"[JOB] {message}", file=log, flush=True)
                     return returncode
