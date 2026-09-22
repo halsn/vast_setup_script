@@ -158,6 +158,63 @@ def test_status_recovers_passed_job_from_smoke_evidence(tmp_path):
     assert "recovered from completed smoke evidence" in value["message"]
 
 
+def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    marker = tmp_path / "child-started"
+    smoke = tmp_path / "slow-smoke.py"
+    smoke.write_text(
+        "#!/usr/bin/env python3\n"
+        "import argparse, json, pathlib, time\n"
+        "p = argparse.ArgumentParser()\n"
+        "p.add_argument('--execute', action='store_true')\n"
+        "p.add_argument('--chain-id')\n"
+        "p.add_argument('--evidence-dir')\n"
+        "a = p.parse_args()\n"
+        f"pathlib.Path({str(marker)!r}).write_text('started')\n"
+        "time.sleep(0.8)\n"
+        "e = pathlib.Path(a.evidence_dir)\n"
+        "e.mkdir(parents=True, exist_ok=True)\n"
+        "(e / 'result.json').write_text(json.dumps({'status':'passed','accepted_segments':2}))\n",
+        encoding="utf-8",
+    )
+    smoke.chmod(0o755)
+
+    first_id = "1" * 32
+    module.start(root, first_id, True, str(smoke))
+    first_dir = root / first_id
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if marker.is_file() and (first_dir / "child_pid").is_file():
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("first paid smoke child never started")
+
+    controller_pid = int((first_dir / "pid").read_text(encoding="utf-8"))
+    os.kill(controller_pid, 9)
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        first_status = module.status(root, first_id)
+        if first_status["state"] == "running" and first_status.get("child_pid"):
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("detached child was not tracked after controller loss")
+
+    second_id = "2" * 32
+    module.start(root, second_id, True, str(smoke))
+    second = wait_terminal(module, root, second_id)
+    assert second["state"] == "failed"
+    assert second["returncode"] == 75
+    assert "already owns the global lock" in second["message"]
+
+    first = wait_terminal(module, root, first_id, timeout=4)
+    assert first["state"] == "completed"
+    assert first["summary"]["status"] == "passed"
+    assert "recovered from completed smoke evidence" in first["message"]
+
+
 def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
     module = load_module()
     root = tmp_path / "jobs"
