@@ -68,6 +68,10 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
     assert 'T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"' in text
     assert 'T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"' in text
     assert 'T8_STUDIO_ENGINE_CAPABILITIES = ("long_video", "prompt_relay")' in text
+    assert 'T8_TEMPLATE_SOURCE = "comfyui-minimax-h3-audio-T8"' in text
+    assert 'T8_LONG_VIDEO_TEMPLATE = "h3_t8_long_video_relay"' in text
+    assert '"MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced"' in text
+    assert '"MiniMaxH3PromptRelayPlanT8Advanced"' in text
     assert '"MiniMaxH3TimelinePlanner"' in text
     assert '"MiniMaxH3FiniteSegmentSampler"' in text
     assert '"MiniMaxH3TimelineSelfLiftSampler"' in text
@@ -119,6 +123,11 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
     timeline_source = module["TIMELINE_SOURCE"]
     timeline_template = module["TIMELINE_TEMPLATE"]
     timeline_clip = module["TIMELINE_CLIP"]
+    t8_template_source = module["T8_TEMPLATE_SOURCE"]
+    t8_long_video_template = module["T8_LONG_VIDEO_TEMPLATE"]
+    t8_long_video_unet = module["T8_LONG_VIDEO_UNET"]
+    t8_long_video_clip = module["T8_LONG_VIDEO_CLIP"]
+    required_t8_long_video_nodes = module["REQUIRED_T8_LONG_VIDEO_NODES"]
     required_studio_nodes = module["REQUIRED_STUDIO_NODES"]
     required_timeline_nodes = module["REQUIRED_TIMELINE_NODES"]
 
@@ -129,6 +138,7 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
     object_info = {
         **{name: {} for name in required_studio_nodes},
         "MiniMaxH3DirectorProjectT8": {},
+        **{name: {} for name in required_t8_long_video_nodes},
         **{name: {} for name in required_timeline_nodes},
         "UNETLoader": {
             "input": {
@@ -143,6 +153,13 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         "CLIPLoader": {
             "input": {"required": {"clip_name": [[timeline_clip]]}}
         },
+    }
+    t8_workflow = {
+        "nodes": [
+            {"type": "UNETLoader", "widgets_values": [t8_long_video_unet]},
+            {"type": "CLIPLoader", "widgets_values": [t8_long_video_clip]},
+            *[{"type": name, "widgets_values": []} for name in required_t8_long_video_nodes],
+        ]
     }
     timeline_workflow = {
         "nodes": [
@@ -174,7 +191,14 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         ),
         "/workflow_templates": (
             "application/json",
-            _json_bytes({timeline_source: [timeline_template]}),
+            _json_bytes({
+                t8_template_source: [t8_long_video_template],
+                timeline_source: [timeline_template],
+            }),
+        ),
+        f"/api/workflow_templates/{t8_template_source}/{t8_long_video_template}.json": (
+            "application/json",
+            _json_bytes(t8_workflow),
         ),
         f"/api/workflow_templates/{timeline_source}/{timeline_template}.json": (
             "application/json",

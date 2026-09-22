@@ -63,6 +63,11 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "d3cfe21625e5170126ce06fbfcfe1d88108688c3" in text
     assert "T8mars/comfyui-minimax-h3-audio-T8.git" in text
     assert "2657a6ddf4143998be16d55d24fb03ac0cc5a794" in text
+    assert 'T8_LONG_VIDEO_TEMPLATE_ALIAS="h3_t8_long_video_relay"' in text
+    assert "2026-08-27_H3_In_Node_Long_Video_Prompt_Relay_EAV_Stock20_Advanced_EXP.json" in text
+    assert "h3_studio_install_t8_long_video_template" in text
+    assert "h3_studio_verify_t8_long_video_template" in text
+    assert "MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced" in text
     assert "Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git" in text
     assert "309b626973d049b073e93557ff94603efc2d1272" in text
     assert "MiniMaxH3全功能合一完全体导演台工作流" in text

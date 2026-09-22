@@ -31,6 +31,11 @@ KJ_NODE_REV="d3cfe21625e5170126ce06fbfcfe1d88108688c3"
 T8_NODE_NAME="comfyui-minimax-h3-audio-T8"
 T8_NODE_REPO="https://github.com/T8mars/comfyui-minimax-h3-audio-T8.git"
 T8_NODE_REV="2657a6ddf4143998be16d55d24fb03ac0cc5a794"
+T8_TEMPLATE_SOURCE_NAME="$T8_NODE_NAME"
+T8_LONG_VIDEO_TEMPLATE_SOURCE="examples/workflows/04-long-video/2026-08-27_H3_In_Node_Long_Video_Prompt_Relay_EAV_Stock20_Advanced_EXP.json"
+T8_LONG_VIDEO_TEMPLATE_ALIAS="h3_t8_long_video_relay"
+T8_LONG_VIDEO_UNET_NAME="minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+T8_LONG_VIDEO_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 
 TIMELINE_NODE_NAME="ComfyUI-MiniMaxH3-TimelineDirector"
 TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git"
@@ -91,6 +96,58 @@ h3_studio_install_runtime_nodes() {
   h3_studio_install_pinned_checkout "$T8_NODE_NAME" "$T8_NODE_REPO" "$T8_NODE_REV" "$t8_target"
   h3_profile_install_requirements "$t8_target"
   h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
+}
+
+h3_studio_install_t8_long_video_template() {
+  local target="$COMFY_DIR/custom_nodes/$T8_NODE_NAME"
+  local source_template="$target/$T8_LONG_VIDEO_TEMPLATE_SOURCE"
+  local template_dir="$target/example_workflows"
+  local alias_template="$template_dir/$T8_LONG_VIDEO_TEMPLATE_ALIAS.json"
+
+  [[ -f "$source_template" ]] || {
+    h3_profile_error "T8 Long Video + Prompt Relay source workflow is missing: $source_template"
+    return 1
+  }
+  mkdir -p "$template_dir"
+  cp -f "$source_template" "$alias_template"
+
+  "$COMFY_PYTHON" - \
+    "$alias_template" \
+    "$T8_LONG_VIDEO_UNET_NAME" \
+    "$T8_LONG_VIDEO_CLIP_NAME" <<'PY'
+import json
+import sys
+
+path, unet_name, clip_name = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    workflow = json.load(handle)
+
+node_types = {
+    str(node.get("type"))
+    for node in workflow.get("nodes", [])
+    if isinstance(node, dict)
+}
+required = {
+    "MiniMaxH3PromptRelayPlanT8Advanced",
+    "MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced",
+}
+missing = sorted(required - node_types)
+if missing:
+    raise SystemExit(
+        "T8 Long Video + Prompt Relay alias is missing required nodes: "
+        + ", ".join(missing)
+    )
+
+serialized = json.dumps(workflow, ensure_ascii=False)
+for expected in (unet_name, clip_name):
+    if expected not in serialized:
+        raise SystemExit(
+            "T8 Long Video + Prompt Relay alias does not reference installed model: "
+            + expected
+        )
+PY
+
+  h3_profile_info "T8 Long Video + Prompt Relay URL template alias installed: $T8_LONG_VIDEO_TEMPLATE_ALIAS"
 }
 
 h3_studio_configure_timeline_model() {
@@ -474,6 +531,96 @@ print(
 PY
 }
 
+h3_studio_verify_t8_long_video_template() {
+  "$COMFY_PYTHON" - \
+    "http://127.0.0.1:$COMFY_PORT/object_info" \
+    "http://127.0.0.1:$COMFY_PORT/workflow_templates" \
+    "http://127.0.0.1:$COMFY_PORT/api/workflow_templates" \
+    "$T8_TEMPLATE_SOURCE_NAME" \
+    "$T8_LONG_VIDEO_TEMPLATE_ALIAS" \
+    "$T8_LONG_VIDEO_UNET_NAME" \
+    "$T8_LONG_VIDEO_CLIP_NAME" <<'PY'
+import json
+import sys
+import urllib.parse
+import urllib.request
+
+(
+    object_info_url,
+    templates_url,
+    template_base_url,
+    source,
+    template,
+    unet_name,
+    clip_name,
+) = sys.argv[1:]
+
+def read_json(url):
+    with urllib.request.urlopen(url, timeout=20) as response:
+        return json.load(response)
+
+catalog = read_json(object_info_url)
+required_nodes = (
+    "MiniMaxH3PromptRelayPlanT8Advanced",
+    "MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced",
+)
+missing = [name for name in required_nodes if name not in catalog]
+if missing:
+    print(
+        "[ERROR] T8 Long Video + Prompt Relay template nodes are not registered: "
+        + ", ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+templates = read_json(templates_url)
+available = templates.get(source) or []
+if template not in available:
+    print(
+        f"[ERROR] T8 engine template '{template}' is not listed for source '{source}'.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+template_url = (
+    template_base_url.rstrip("/")
+    + "/"
+    + urllib.parse.quote(source, safe="")
+    + "/"
+    + urllib.parse.quote(template + ".json", safe="")
+)
+payload = read_json(template_url)
+if not isinstance(payload, dict) or not payload.get("nodes"):
+    print("[ERROR] T8 Long Video + Prompt Relay template JSON is invalid.", file=sys.stderr)
+    raise SystemExit(1)
+
+types = {
+    str(node.get("type"))
+    for node in payload.get("nodes", [])
+    if isinstance(node, dict)
+}
+missing_payload = [name for name in required_nodes if name not in types]
+if missing_payload:
+    print(
+        "[ERROR] T8 Long Video + Prompt Relay template payload is missing: "
+        + ", ".join(missing_payload),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+serialized = json.dumps(payload, ensure_ascii=False)
+for expected in (unet_name, clip_name):
+    if expected not in serialized:
+        print(
+            f"[ERROR] T8 Long Video + Prompt Relay template does not use installed model: {expected}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+print("[OK] T8 Long Video + Prompt Relay URL template is ready", file=sys.stderr)
+PY
+}
+
 h3_studio_verify_timeline_director() {
   if [[ "$H3_INSTALL_TIMELINE_DIRECTOR" != "1" ]]; then
     return 0
@@ -683,6 +830,7 @@ main_studio() {
   h3_studio_configure_timeline_model
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
+  h3_studio_install_t8_long_video_template
   h3_studio_install_timeline_director
   h3_studio_install_timeline_model
   h3_studio_install_webui
@@ -692,12 +840,13 @@ main_studio() {
   h3_profile_finish
   h3_studio_verify_webui_node_contract
   h3_studio_verify_t8_director
+  h3_studio_verify_t8_long_video_template
   h3_studio_verify_timeline_director
   h3_studio_write_supervisor_config
   h3_studio_start
   h3_studio_wait_ready
 
-  h3_profile_info "H3 Studio ready on 0.0.0.0:$H3_STUDIO_PORT (Studio + T8 Obsidian Director + Timeline Director, all pinned)."
+  h3_profile_info "H3 Studio ready on 0.0.0.0:$H3_STUDIO_PORT (Studio + T8 Long Video/Prompt Relay + T8 Director + Timeline Director, all pinned)."
 }
 
 main_studio "$@"

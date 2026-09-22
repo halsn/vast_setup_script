@@ -72,6 +72,14 @@ T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"
 T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"
 T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"
 T8_STUDIO_ENGINE_CAPABILITIES = ("long_video", "prompt_relay")
+T8_TEMPLATE_SOURCE = "comfyui-minimax-h3-audio-T8"
+T8_LONG_VIDEO_TEMPLATE = "h3_t8_long_video_relay"
+T8_LONG_VIDEO_UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+T8_LONG_VIDEO_CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+REQUIRED_T8_LONG_VIDEO_NODES = (
+    "MiniMaxH3PromptRelayPlanT8Advanced",
+    "MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced",
+)
 
 
 @dataclass
@@ -125,17 +133,17 @@ def check_contract(
     variant = TIMELINE_VARIANTS[timeline_model]
     timeline_unet = str(variant["unet"])
     timeline_steps = int(variant["steps"])
-    print("[1/8] H3 Studio HTTP")
+    print("[1/9] H3 Studio HTTP")
     home = request(_url(studio_url, "/"))
     if home.status != 200:
         raise RuntimeError(f"Studio root returned HTTP {home.status}")
 
-    print("[2/8] H3 Studio -> ComfyUI bridge")
+    print("[2/9] H3 Studio -> ComfyUI bridge")
     status = request(_url(studio_url, "/api/comfyui/status")).json()
     if status.get("up") is not True:
         raise RuntimeError(f"Studio cannot reach ComfyUI: {status}")
 
-    print("[3/8] H3 Studio node contract")
+    print("[3/9] H3 Studio node contract")
     catalog = request(_url(comfy_url, "/object_info"), timeout=30).json()
     missing_studio = [name for name in REQUIRED_STUDIO_NODES if name not in catalog]
     if missing_studio:
@@ -143,7 +151,7 @@ def check_contract(
             "H3 Studio required nodes are missing: " + ", ".join(missing_studio)
         )
 
-    print("[4/8] T8 Obsidian Director")
+    print("[4/9] T8 Obsidian Director")
     if T8_DIRECTOR_NODE not in catalog:
         raise RuntimeError(f"T8 Obsidian Director node is missing: {T8_DIRECTOR_NODE}")
     director_ui = request(_url(comfy_url, T8_DIRECTOR_UI))
@@ -174,7 +182,41 @@ def check_contract(
             "T8 Studio engine capabilities are not ready: " + ", ".join(unready)
         )
 
-    print("[5/8] Timeline Director nodes")
+    print("[5/9] T8 Long Video + Prompt Relay template")
+    templates = request(_url(comfy_url, "/workflow_templates")).json()
+    t8_available = templates.get(T8_TEMPLATE_SOURCE) or []
+    if T8_LONG_VIDEO_TEMPLATE not in t8_available:
+        raise RuntimeError(
+            f"Template {T8_LONG_VIDEO_TEMPLATE!r} is not listed for {T8_TEMPLATE_SOURCE!r}"
+        )
+    t8_path = (
+        "/api/workflow_templates/"
+        + urllib.parse.quote(T8_TEMPLATE_SOURCE, safe="")
+        + "/"
+        + urllib.parse.quote(T8_LONG_VIDEO_TEMPLATE + ".json", safe="")
+    )
+    t8_workflow = request(_url(comfy_url, t8_path)).json()
+    if not isinstance(t8_workflow, dict) or not t8_workflow.get("nodes"):
+        raise RuntimeError("T8 Long Video + Prompt Relay template JSON is missing workflow nodes")
+    t8_types = {
+        str(node.get("type"))
+        for node in t8_workflow.get("nodes", [])
+        if isinstance(node, dict)
+    }
+    missing_t8 = [name for name in REQUIRED_T8_LONG_VIDEO_NODES if name not in t8_types]
+    if missing_t8:
+        raise RuntimeError(
+            "T8 Long Video + Prompt Relay template is missing nodes: "
+            + ", ".join(missing_t8)
+        )
+    t8_serialized = json.dumps(t8_workflow, ensure_ascii=False)
+    for expected in (T8_LONG_VIDEO_UNET, T8_LONG_VIDEO_CLIP):
+        if expected not in t8_serialized:
+            raise RuntimeError(
+                f"T8 Long Video + Prompt Relay template does not use installed model: {expected}"
+            )
+
+    print("[6/9] Timeline Director nodes")
     missing = [name for name in REQUIRED_TIMELINE_NODES if name not in catalog]
     if missing:
         raise RuntimeError(
@@ -197,7 +239,7 @@ def check_contract(
             f"Timeline Director CLIP is not selectable: {TIMELINE_CLIP}"
         )
 
-    print("[6/8] Timeline Director template catalog")
+    print("[7/9] Timeline Director template catalog")
     templates = request(_url(comfy_url, "/workflow_templates")).json()
     available = templates.get(TIMELINE_SOURCE) or []
     if TIMELINE_TEMPLATE not in available:
@@ -205,7 +247,7 @@ def check_contract(
             f"Template {TIMELINE_TEMPLATE!r} is not listed for {TIMELINE_SOURCE!r}"
         )
 
-    print("[7/8] Timeline Director template payload")
+    print("[8/9] Timeline Director template payload")
     path = (
         "/api/workflow_templates/"
         + urllib.parse.quote(TIMELINE_SOURCE, safe="")
@@ -242,7 +284,7 @@ def check_contract(
             f"Timeline Director scheduler mismatch: {scheduler_steps} != {[timeline_steps]}"
         )
 
-    print("[8/8] Cross-surface contract complete")
+    print("[9/9] Cross-surface contract complete")
     print(
         "[OK] H3 Studio + T8 Long Video/Prompt Relay + Timeline Director contract smoke passed"
     )
@@ -375,7 +417,7 @@ def verify_generated_media(studio_url: str, workspace: str, event: dict[str, Any
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate H3 Open Studio + T8 Obsidian Director + Timeline Director. "
+            "Validate H3 Open Studio + T8 Long Video/Prompt Relay + T8 Director + Timeline Director. "
             "Default mode is read-only; --generate submits real GPU work."
         )
     )
