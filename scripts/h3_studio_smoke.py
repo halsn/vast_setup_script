@@ -71,6 +71,7 @@ T8_DIRECTOR_NODE = "MiniMaxH3DirectorProjectT8"
 T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"
 T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"
 T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"
+T8_STUDIO_ENGINE_CAPABILITIES = ("long_video", "prompt_relay")
 
 
 @dataclass
@@ -155,8 +156,23 @@ def check_contract(
             "T8 Obsidian Director capabilities schema mismatch: "
             + str(capabilities.get("schema"))
         )
-    if not capabilities.get("capabilities"):
+    rows = capabilities.get("capabilities")
+    if not isinstance(rows, list) or not rows:
         raise RuntimeError("T8 Obsidian Director capabilities inventory is empty")
+    by_id = {
+        row.get("id"): row
+        for row in rows
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    unready = [
+        capability
+        for capability in T8_STUDIO_ENGINE_CAPABILITIES
+        if by_id.get(capability, {}).get("state") != "ready"
+    ]
+    if unready:
+        raise RuntimeError(
+            "T8 Studio engine capabilities are not ready: " + ", ".join(unready)
+        )
 
     print("[5/8] Timeline Director nodes")
     missing = [name for name in REQUIRED_TIMELINE_NODES if name not in catalog]
@@ -227,7 +243,9 @@ def check_contract(
         )
 
     print("[8/8] Cross-surface contract complete")
-    print("[OK] H3 Studio + T8 Director + Timeline Director contract smoke passed")
+    print(
+        "[OK] H3 Studio + T8 Long Video/Prompt Relay + Timeline Director contract smoke passed"
+    )
 
 
 def create_workspace(studio_url: str, name: str) -> None:

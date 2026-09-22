@@ -449,7 +449,28 @@ if not isinstance(rows, list) or not rows:
     print("[ERROR] T8 Director capabilities inventory is empty.", file=sys.stderr)
     raise SystemExit(1)
 
-print("[OK] T8 Obsidian Director node, UI and capabilities routes are ready", file=sys.stderr)
+required_capabilities = ("long_video", "prompt_relay")
+by_id = {
+    row.get("id"): row
+    for row in rows
+    if isinstance(row, dict) and isinstance(row.get("id"), str)
+}
+unready = [
+    capability
+    for capability in required_capabilities
+    if by_id.get(capability, {}).get("state") != "ready"
+]
+if unready:
+    print(
+        "[ERROR] T8 Studio engine capabilities are not ready: " + ", ".join(unready),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print(
+    "[OK] T8 Obsidian Director + Long Video + Prompt Relay engine contract is ready",
+    file=sys.stderr,
+)
 PY
 }
 

@@ -67,6 +67,7 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
     assert 'T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"' in text
     assert 'T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"' in text
     assert 'T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"' in text
+    assert 'T8_STUDIO_ENGINE_CAPABILITIES = ("long_video", "prompt_relay")' in text
     assert '"MiniMaxH3TimelinePlanner"' in text
     assert '"MiniMaxH3FiniteSegmentSampler"' in text
     assert '"MiniMaxH3TimelineSelfLiftSampler"' in text
@@ -165,7 +166,10 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
             "application/json",
             _json_bytes({
                 "schema": "t8.minimax_h3.director_capabilities.v1",
-                "capabilities": [{"id": "long_video", "state": "ready"}],
+                "capabilities": [
+                    {"id": "long_video", "state": "ready"},
+                    {"id": "prompt_relay", "state": "ready"},
+                ],
             }),
         ),
         "/workflow_templates": (

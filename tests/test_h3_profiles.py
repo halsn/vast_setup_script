@@ -96,3 +96,4 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert "MiniMaxH3DirectorProjectT8" in text
     assert "/minimax_h3_t8/director/ui" in text
     assert "/minimax_h3_t8/director/capabilities" in text
+    assert 'required_capabilities = ("long_video", "prompt_relay")' in text
