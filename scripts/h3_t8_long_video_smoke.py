@@ -335,12 +335,14 @@ def _queue_prompt_ids(queue: dict[str, Any], key: str) -> list[str]:
     return result
 
 
-def interrupt_owned_prompt(comfy_url: str, prompt_id: str) -> None:
+def interrupt_owned_prompt(comfy_url: str, prompt_id: str) -> dict[str, Any]:
     queue = request(_url(comfy_url, "/queue")).json()
     running = _queue_prompt_ids(queue, "queue_running")
-    if running != [prompt_id]:
+    pending = _queue_prompt_ids(queue, "queue_pending")
+    if running != [prompt_id] or pending:
         raise RuntimeError(
-            f"Refusing interrupt: running queue is {running!r}, expected only {prompt_id!r}"
+            "Refusing interrupt: smoke must own the sole running prompt with no pending "
+            f"work; running={running!r}, pending={pending!r}"
         )
     response = request(
         _url(comfy_url, "/interrupt"),
@@ -350,6 +352,14 @@ def interrupt_owned_prompt(comfy_url: str, prompt_id: str) -> None:
     )
     if response.status != 200:
         raise RuntimeError(f"Interrupt returned HTTP {response.status}")
+    return {
+        "method": "POST",
+        "endpoint": "/interrupt",
+        "http_status": response.status,
+        "prompt_id": prompt_id,
+        "queue_running_before": running,
+        "queue_pending_before": pending,
+    }
 
 
 def wait_for(
@@ -739,12 +749,24 @@ def run_smoke(
     )
 
     print("[GPU 3/6] interrupt only the owned running prompt")
-    interrupt_owned_prompt(comfy_url, first_prompt)
+    interrupt_receipt = interrupt_owned_prompt(comfy_url, first_prompt)
+    (evidence_dir / "interrupt-request.json").write_text(
+        json.dumps(interrupt_receipt, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     first_history = wait_history(comfy_url, first_prompt, timeout)
+    (evidence_dir / "first-history.json").write_text(
+        json.dumps(first_history, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     first_terminal = history_terminal_kind(first_history)
     if first_terminal != "execution_interrupted":
         raise RuntimeError(
             f"Expected execution_interrupted for first run, got {first_terminal}"
+        )
+    if (first_history.get("status") or {}).get("completed") is not False:
+        raise RuntimeError(
+            "Interrupted ComfyUI history must remain completed=false; no interruption qualification"
         )
     interrupted = wait_for(
         lambda: (
@@ -772,9 +794,15 @@ def run_smoke(
         encoding="utf-8",
     )
     second_history = wait_history(comfy_url, second_prompt, timeout)
+    (evidence_dir / "resume-history.json").write_text(
+        json.dumps(second_history, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     second_terminal = history_terminal_kind(second_history)
     if second_terminal != "execution_success":
         raise RuntimeError(f"Resume did not succeed: {second_terminal}")
+    if (second_history.get("status") or {}).get("completed") is not True:
+        raise RuntimeError("Successful resumed ComfyUI history must be completed=true")
 
     print("[GPU 5/6] validate two-segment manifest, audits and immutable first segment")
     complete = wait_for(
