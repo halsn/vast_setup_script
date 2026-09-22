@@ -27,6 +27,31 @@ def wait_terminal(module, root, job_id, timeout=5):
     raise AssertionError("job did not finish")
 
 
+def paid_summary(chain_id: str) -> dict:
+    return {
+        "status": "passed",
+        "chain_id": chain_id,
+        "first_prompt_id": "prompt-first",
+        "resume_prompt_id": "prompt-resume",
+        "contract_sha256": "a" * 64,
+        "manifest_revision": 2,
+        "accepted_segments": 2,
+        "first_segment_unchanged_after_resume": True,
+        "prompt_relay_applied_all_segments": True,
+        "eav_verified_all_segments": True,
+        "media": {
+            "frames": 192,
+            "fps": 24,
+            "width": 512,
+            "height": 288,
+            "audio_streams": 1,
+            "duration_seconds": 8.0,
+            "bytes": 4096,
+            "sha256": "b" * 64,
+        },
+    }
+
+
 def write_smoke(path: Path, *, marker: Path, exit_code: int = 0):
     path.write_text(
         "#!/usr/bin/env python3\n"
@@ -180,12 +205,7 @@ def test_status_recovers_passed_job_from_smoke_evidence(tmp_path):
     (target / "child_pid").write_text("99999999\n", encoding="utf-8")
     module.atomic_json(
         evidence / "result.json",
-        {
-            "status": "passed",
-            "accepted_segments": 2,
-            "prompt_relay_applied_all_segments": True,
-            "eav_verified_all_segments": True,
-        },
+        paid_summary("wb_t8_" + job_id[:20]),
     )
 
     value = module.status(root, job_id)
@@ -212,7 +232,14 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
         "time.sleep(0.8)\n"
         "e = pathlib.Path(a.evidence_dir)\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
-        "(e / 'result.json').write_text(json.dumps({'status':'passed','accepted_segments':2}))\n",
+        "summary = {'status':'passed','chain_id':a.chain_id,"
+        "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
+        "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
+        "'first_segment_unchanged_after_resume':True,"
+        "'prompt_relay_applied_all_segments':True,'eav_verified_all_segments':True,"
+        "'media':{'frames':192,'fps':24,'width':512,'height':288,"
+        "'audio_streams':1,'duration_seconds':8.0,'bytes':4096,'sha256':'b'*64}}\n"
+        "(e / 'result.json').write_text(json.dumps(summary))\n",
         encoding="utf-8",
     )
     smoke.chmod(0o755)
@@ -252,6 +279,19 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
     assert "recovered from completed smoke evidence" in first["message"]
 
 
+def test_paid_partial_evidence_fails_closed(tmp_path):
+    module = load_module()
+    chain_id = "wb_t8_" + ("4" * 20)
+    summary = paid_summary(chain_id)
+    summary["prompt_relay_applied_all_segments"] = False
+    try:
+        module.validate_paid_summary(summary, chain_id)
+    except RuntimeError as exc:
+        assert "prompt_relay_applied_all_segments" in str(exc)
+    else:
+        raise AssertionError("partial paid evidence must fail closed")
+
+
 def test_paid_zero_exit_without_evidence_fails_closed(tmp_path):
     module = load_module()
     root = tmp_path / "jobs"
@@ -277,9 +317,17 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
         "import json, pathlib, sys\n"
         f"pathlib.Path({str(argv_file)!r}).write_text(json.dumps(sys.argv[1:]))\n"
         "args = sys.argv[1:]\n"
+        "chain = args[args.index('--chain-id') + 1]\n"
         "e = pathlib.Path(args[args.index('--evidence-dir') + 1])\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
-        "(e / 'result.json').write_text(json.dumps({'status':'passed','accepted_segments':2}))\n",
+        "summary = {'status':'passed','chain_id':chain,"
+        "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
+        "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
+        "'first_segment_unchanged_after_resume':True,"
+        "'prompt_relay_applied_all_segments':True,'eav_verified_all_segments':True,"
+        "'media':{'frames':192,'fps':24,'width':512,'height':288,"
+        "'audio_streams':1,'duration_seconds':8.0,'bytes':4096,'sha256':'b'*64}}\n"
+        "(e / 'result.json').write_text(json.dumps(summary))\n",
         encoding="utf-8",
     )
     smoke.chmod(0o755)
