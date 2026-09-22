@@ -284,9 +284,10 @@ h3_studio_install_t8_release_smoke_tool() {
   local job_tool_path="$H3_T8_SMOKE_TOOL_DIR/h3_t8_smoke_job.py"
   local source_path="${SCRIPT_DIR:+$SCRIPT_DIR/h3_t8_long_video_smoke.py}"
   local job_source_path="${SCRIPT_DIR:+$SCRIPT_DIR/h3_t8_smoke_job.py}"
-  local quoted_python quoted_tool quoted_job_tool quoted_root quoted_url quoted_smoke_bin
+  local job_root="$COMFY_DIR/.h3-studio/t8-smoke-jobs"
+  local quoted_python quoted_tool quoted_job_tool quoted_root quoted_url quoted_smoke_bin quoted_job_root
 
-  mkdir -p "$H3_T8_SMOKE_TOOL_DIR" "$(dirname "$H3_T8_SMOKE_BIN")" "$(dirname "$H3_T8_SMOKE_JOB_BIN")"
+  mkdir -p "$H3_T8_SMOKE_TOOL_DIR" "$(dirname "$H3_T8_SMOKE_BIN")" "$(dirname "$H3_T8_SMOKE_JOB_BIN")" "$job_root"
   if [[ -n "$source_path" && -f "$source_path" ]]; then
     cp -f "$source_path" "$tool_path"
   else
@@ -306,6 +307,7 @@ h3_studio_install_t8_release_smoke_tool() {
   printf -v quoted_root '%q' "$COMFY_DIR"
   printf -v quoted_url '%q' "http://127.0.0.1:$COMFY_PORT"
   printf -v quoted_smoke_bin '%q' "$H3_T8_SMOKE_BIN"
+  printf -v quoted_job_root '%q' "$job_root"
   cat > "$H3_T8_SMOKE_BIN" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -315,13 +317,14 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export H3_T8_SMOKE_BIN=$quoted_smoke_bin
-exec $quoted_python $quoted_job_tool "\$@"
+exec $quoted_python $quoted_job_tool --job-root $quoted_job_root "\$@"
 EOF
   chmod 0755 "$H3_T8_SMOKE_BIN" "$H3_T8_SMOKE_JOB_BIN"
   "$H3_T8_SMOKE_JOB_BIN" --help >/dev/null
 
   h3_profile_info "Installed T8 GPU release smoke command: $H3_T8_SMOKE_BIN"
   h3_profile_info "Installed durable T8 smoke job command: $H3_T8_SMOKE_JOB_BIN"
+  h3_profile_info "T8 smoke job state: $job_root"
   h3_profile_info "Preflight: h3-t8-long-video-smoke ; paid interrupt/resume run: h3-t8-long-video-smoke --execute"
 }
 h3_studio_configure_timeline_model() {
