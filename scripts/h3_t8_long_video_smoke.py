@@ -679,6 +679,34 @@ def verify_final_media(root: Path, state: dict[str, Any], evidence_dir: Path) ->
     }
 
 
+def add_comfyui_view(
+    media: dict[str, Any],
+    output_root: Path,
+) -> dict[str, Any]:
+    value = media.get("path")
+    if not isinstance(value, str) or not value:
+        raise RuntimeError("Final media receipt has no path for ComfyUI review")
+    path = Path(value).resolve()
+    try:
+        relative = path.relative_to(output_root.resolve())
+    except ValueError as exc:
+        raise RuntimeError(
+            "Final T8 smoke video is outside the ComfyUI output directory"
+        ) from exc
+    if relative.name in {"", ".", ".."}:
+        raise RuntimeError("Final T8 smoke video has an invalid review filename")
+    subfolder = relative.parent.as_posix()
+    if subfolder == ".":
+        subfolder = ""
+    result = dict(media)
+    result["comfyui_view"] = {
+        "filename": relative.name,
+        "subfolder": subfolder,
+        "type": "output",
+    }
+    return result
+
+
 def run_smoke(
     *,
     comfy_url: str,
@@ -826,7 +854,10 @@ def run_smoke(
     report = validate_final_report(root)
 
     print("[GPU 6/6] strict-decode final 192-frame AV output")
-    media = verify_final_media(root, complete, evidence_dir)
+    media = add_comfyui_view(
+        verify_final_media(root, complete, evidence_dir),
+        output_root,
+    )
     result = {
         "status": "passed",
         "qualification": (
