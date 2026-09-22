@@ -39,6 +39,50 @@ def test_runtime_identity_requires_pinned_clean_t8_checkout(tmp_path, monkeypatc
     }
 
 
+def test_runtime_identity_allows_only_generated_workflow_aliases(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+
+    def capture(_root, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return module.T8_REVISION
+        if args and args[0] == "status":
+            return (
+                "?? example_workflows/h3_t8_long_video_relay.json\n"
+                "?? example_workflows/h3_t8_long_video_relay_smoke.json"
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "_git_capture", capture)
+    identity = module.verify_runtime_identity(comfy, hash_models=False)
+    assert identity["t8_revision"] == module.T8_REVISION
+
+
+def test_runtime_identity_rejects_unexpected_untracked_code(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+
+    def capture(_root, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return module.T8_REVISION
+        if args and args[0] == "status":
+            return "?? h3_t8/unexpected_runtime.py"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "_git_capture", capture)
+    try:
+        module.verify_runtime_identity(comfy, hash_models=False)
+    except RuntimeError as exc:
+        assert "unexpected tracked/untracked changes" in str(exc)
+        assert "unexpected_runtime.py" in str(exc)
+    else:
+        raise AssertionError("unexpected T8 checkout code must fail the release preflight")
+
+
 def test_runtime_identity_hashes_exact_paid_model_files(tmp_path, monkeypatch):
     module = load_module()
     comfy = tmp_path / "ComfyUI"
