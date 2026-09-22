@@ -37,6 +37,9 @@ T8_LONG_VIDEO_TEMPLATE_ALIAS="h3_t8_long_video_relay"
 T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS="h3_t8_long_video_relay_smoke"
 T8_LONG_VIDEO_UNET_NAME="minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 T8_LONG_VIDEO_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+H3_T8_SMOKE_TOOL_URL="${H3_T8_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/main/scripts/h3_t8_long_video_smoke.py}"
+H3_T8_SMOKE_TOOL_DIR="${H3_T8_SMOKE_TOOL_DIR:-/opt/h3-studio-tools}"
+H3_T8_SMOKE_BIN="${H3_T8_SMOKE_BIN:-/usr/local/bin/h3-t8-long-video-smoke}"
 
 TIMELINE_NODE_NAME="ComfyUI-MiniMaxH3-TimelineDirector"
 TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git"
@@ -274,6 +277,34 @@ PY
   h3_profile_info "T8 standard template installed: $T8_LONG_VIDEO_TEMPLATE_ALIAS (30s 736x416 Stock20)."
   h3_profile_info "T8 validation template installed: $T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS (8s 512x288, 2 segments)."
 }
+h3_studio_install_t8_release_smoke_tool() {
+  local tool_path="$H3_T8_SMOKE_TOOL_DIR/h3_t8_long_video_smoke.py"
+  local source_path="${SCRIPT_DIR:+$SCRIPT_DIR/h3_t8_long_video_smoke.py}"
+  local quoted_python quoted_tool quoted_root quoted_url
+
+  mkdir -p "$H3_T8_SMOKE_TOOL_DIR" "$(dirname "$H3_T8_SMOKE_BIN")"
+  if [[ -n "$source_path" && -f "$source_path" ]]; then
+    cp -f "$source_path" "$tool_path"
+  else
+    curl -fsSL --retry 3 --connect-timeout 15 "$H3_T8_SMOKE_TOOL_URL" -o "$tool_path"
+  fi
+  chmod 0755 "$tool_path"
+  "$COMFY_PYTHON" -m py_compile "$tool_path"
+
+  printf -v quoted_python '%q' "$COMFY_PYTHON"
+  printf -v quoted_tool '%q' "$tool_path"
+  printf -v quoted_root '%q' "$COMFY_DIR"
+  printf -v quoted_url '%q' "http://127.0.0.1:$COMFY_PORT"
+  cat > "$H3_T8_SMOKE_BIN" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+exec $quoted_python $quoted_tool --comfy-root $quoted_root --comfy-url $quoted_url "\$@"
+EOF
+  chmod 0755 "$H3_T8_SMOKE_BIN"
+  h3_profile_info "Installed T8 GPU release smoke command: $H3_T8_SMOKE_BIN"
+  h3_profile_info "Preflight: h3-t8-long-video-smoke ; paid interrupt/resume run: h3-t8-long-video-smoke --execute"
+}
+
 h3_studio_configure_timeline_model() {
   case "$H3_TIMELINE_MODEL_VARIANT" in
     fused)
@@ -999,6 +1030,7 @@ main_studio() {
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
   h3_studio_install_t8_long_video_template
+  h3_studio_install_t8_release_smoke_tool
   h3_studio_install_timeline_director
   h3_studio_install_timeline_model
   h3_studio_install_webui
@@ -1015,6 +1047,7 @@ main_studio() {
   h3_studio_wait_ready
 
   h3_profile_info "H3 Studio ready on 0.0.0.0:$H3_STUDIO_PORT (Studio + T8 Long Video/Prompt Relay + T8 Director + Timeline Director, all pinned)."
+  h3_profile_info "T8 release smoke: h3-t8-long-video-smoke --execute"
 }
 
 main_studio "$@"
