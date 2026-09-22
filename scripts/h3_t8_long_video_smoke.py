@@ -27,6 +27,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable
 
+QUALIFICATION_ID = "h3.t8.stock20-relay-eav-8s.v1"
 FPS = 24
 TOTAL_FRAMES = 192
 WIDTH = 512
@@ -860,6 +861,7 @@ def run_smoke(
     )
     result = {
         "status": "passed",
+        "qualification_id": QUALIFICATION_ID,
         "qualification": (
             "mechanical two-segment Stock20 Prompt Relay + EAV interrupt/resume smoke; "
             "human seam/audio/semantic quality review remains separate"
