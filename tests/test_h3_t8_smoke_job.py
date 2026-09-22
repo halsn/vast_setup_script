@@ -124,6 +124,67 @@ def test_existing_job_rejects_request_identity_mismatch(tmp_path):
         raise AssertionError("mismatched durable job identity must be rejected")
 
 
+def test_job_request_rejects_evidence_path_outside_job_root(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    job_id = "7" * 32
+    target = root / job_id
+    target.mkdir(parents=True)
+    module.atomic_json(
+        target / "request.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": job_id,
+            "execute": True,
+            "chain_id": "wb_t8_" + job_id[:20],
+            "evidence_dir": str(tmp_path / "outside-evidence"),
+        },
+    )
+
+    try:
+        module.status(root, job_id)
+    except RuntimeError as exc:
+        assert "escaped job root" in str(exc)
+    else:
+        raise AssertionError("evidence path outside the durable job must be rejected")
+
+
+def test_existing_completed_result_is_revalidated_before_reporting_success(tmp_path):
+    module = load_module()
+    root = tmp_path / "jobs"
+    job_id = "5" * 32
+    target = root / job_id
+    target.mkdir(parents=True)
+    module.atomic_json(
+        target / "request.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": job_id,
+            "execute": True,
+            "chain_id": "wb_t8_" + job_id[:20],
+            "evidence_dir": str(target / "evidence"),
+        },
+    )
+    bad = paid_summary("wb_t8_" + job_id[:20])
+    bad["eav_verified_all_segments"] = False
+    module.atomic_json(
+        target / "result.json",
+        {
+            "schema": module.SCHEMA,
+            "job_id": job_id,
+            "state": "completed",
+            "returncode": 0,
+            "message": "old helper claimed success",
+            "summary": bad,
+        },
+    )
+
+    value = module.status(root, job_id)
+    assert value["state"] == "failed"
+    assert value["returncode"] == 74
+    assert "eav_verified_all_segments" in value["message"]
+
+
 def test_tail_lines_is_bounded_without_loading_semantic_state(tmp_path):
     module = load_module()
     path = tmp_path / "job.log"
