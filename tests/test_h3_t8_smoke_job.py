@@ -349,7 +349,7 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
     root = tmp_path / "jobs"
     marker = tmp_path / "child-started"
     smoke = tmp_path / "slow-smoke.py"
-    runtime_json = json.dumps(TEST_RUNTIME_IDENTITY, separators=(",", ":"))
+    runtime_literal = repr(TEST_RUNTIME_IDENTITY)
     smoke.write_text(
         "#!/usr/bin/env python3\n"
         "import argparse, json, pathlib, time\n"
@@ -363,7 +363,7 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
         "e = pathlib.Path(a.evidence_dir)\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
         "summary = {'status':'passed','qualification_id':'h3.t8.stock20-relay-eav-8s.v1','chain_id':a.chain_id,"
-        f"'runtime_identity':{runtime_json},"
+        f"'runtime_identity':{runtime_literal},"
         "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
         "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
         "'first_segment_unchanged_after_resume':True,"
@@ -486,7 +486,7 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
     root = tmp_path / "jobs"
     argv_file = tmp_path / "argv.json"
     smoke = tmp_path / "smoke.py"
-    runtime_json = json.dumps(TEST_RUNTIME_IDENTITY, separators=(",", ":"))
+    runtime_literal = repr(TEST_RUNTIME_IDENTITY)
     smoke.write_text(
         "#!/usr/bin/env python3\n"
         "import json, pathlib, sys\n"
@@ -496,7 +496,7 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
         "e = pathlib.Path(args[args.index('--evidence-dir') + 1])\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
         "summary = {'status':'passed','qualification_id':'h3.t8.stock20-relay-eav-8s.v1','chain_id':chain,"
-        f"'runtime_identity':{runtime_json},"
+        f"'runtime_identity':{runtime_literal},"
         "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
         "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
         "'first_segment_unchanged_after_resume':True,"
