@@ -70,6 +70,7 @@ def test_open_source_studio_profile_is_pinned_and_health_checked():
     assert 'runner_values[2] = 512' in text
     assert 'runner_values[3] = 288' in text
     assert 'relay_values[2] = 192' in text
+    assert (ROOT / "scripts" / "h3_t8_long_video_smoke.py").is_file()
     assert "2026-08-27_H3_In_Node_Long_Video_Prompt_Relay_EAV_Stock20_Advanced_EXP.json" in text
     assert "h3_studio_install_t8_long_video_template" in text
     assert "h3_studio_verify_t8_long_video_template" in text
