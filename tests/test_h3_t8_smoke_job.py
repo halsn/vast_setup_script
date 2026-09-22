@@ -30,6 +30,7 @@ def wait_terminal(module, root, job_id, timeout=5):
 def paid_summary(chain_id: str) -> dict:
     return {
         "status": "passed",
+        "qualification_id": "h3.t8.stock20-relay-eav-8s.v1",
         "chain_id": chain_id,
         "first_prompt_id": "prompt-first",
         "resume_prompt_id": "prompt-resume",
@@ -332,7 +333,7 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
         "time.sleep(0.8)\n"
         "e = pathlib.Path(a.evidence_dir)\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
-        "summary = {'status':'passed','chain_id':a.chain_id,"
+        "summary = {'status':'passed','qualification_id':'h3.t8.stock20-relay-eav-8s.v1','chain_id':a.chain_id,"
         "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
         "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
         "'first_segment_unchanged_after_resume':True,"
@@ -393,6 +394,19 @@ def test_paid_review_receipt_rejects_path_traversal():
         raise AssertionError("review receipt path traversal must fail closed")
 
 
+def test_paid_evidence_rejects_wrong_qualification_id():
+    module = load_module()
+    chain_id = "wb_t8_" + ("4" * 20)
+    summary = paid_summary(chain_id)
+    summary["qualification_id"] = "other-route"
+    try:
+        module.validate_paid_summary(summary, chain_id)
+    except RuntimeError as exc:
+        assert "qualification_id" in str(exc)
+    else:
+        raise AssertionError("wrong release qualification must fail closed")
+
+
 def test_paid_partial_evidence_fails_closed(tmp_path):
     module = load_module()
     chain_id = "wb_t8_" + ("4" * 20)
@@ -434,7 +448,7 @@ def test_paid_job_uses_fixed_chain_and_evidence_arguments(tmp_path):
         "chain = args[args.index('--chain-id') + 1]\n"
         "e = pathlib.Path(args[args.index('--evidence-dir') + 1])\n"
         "e.mkdir(parents=True, exist_ok=True)\n"
-        "summary = {'status':'passed','chain_id':chain,"
+        "summary = {'status':'passed','qualification_id':'h3.t8.stock20-relay-eav-8s.v1','chain_id':chain,"
         "'first_prompt_id':'prompt-first','resume_prompt_id':'prompt-resume',"
         "'contract_sha256':'a'*64,'manifest_revision':2,'accepted_segments':2,"
         "'first_segment_unchanged_after_resume':True,"
