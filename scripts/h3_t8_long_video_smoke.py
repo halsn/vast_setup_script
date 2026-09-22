@@ -360,17 +360,12 @@ def wait_for(
     interval: float = 0.25,
 ) -> Any:
     deadline = time.monotonic() + timeout
-    last_error: Exception | None = None
     while time.monotonic() < deadline:
-        try:
-            value = predicate()
-            if value:
-                return value
-            except (OSError, json.JSONDecodeError) as exc:
-            last_error = exc
+        value = predicate()
+        if value:
+            return value
         time.sleep(interval)
-    detail = f"; last error: {last_error}" if last_error else ""
-    raise TimeoutError(f"Timed out waiting for {description}{detail}")
+    raise TimeoutError(f"Timed out waiting for {description}")
 
 
 def wait_history(comfy_url: str, prompt_id: str, timeout: float) -> dict[str, Any]:

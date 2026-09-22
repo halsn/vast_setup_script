@@ -35,6 +35,8 @@ def test_build_prompt_is_exact_two_segment_stock20_relay_eav():
     assert runner["steps"] == 20
     assert runner["prompt_relay_mode"] == "apply_exp"
     assert runner["eav_mode"] == "apply_exp"
+    assert runner["task_type"] == "auto"
+    assert runner["add_source_as_reference"] is True
     assert runner["resume_existing"] is True
     assert runner["prompt_relay_plan"] == ["5", 0]
 
@@ -132,3 +134,10 @@ def test_validate_final_report_requires_relay_and_eav_on_both_segments(tmp_path)
     }
     (tmp_path / module.REPORT_NAME).write_text(json.dumps(report), encoding="utf-8")
     assert module.validate_final_report(tmp_path) == report
+
+
+def test_discover_output_root_accepts_explicit_path(tmp_path):
+    module = load_module()
+    output = tmp_path / "custom-output"
+    assert module.discover_output_root(tmp_path, str(output)) == output.resolve()
+    assert output.is_dir()
