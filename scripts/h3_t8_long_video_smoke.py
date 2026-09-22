@@ -23,7 +23,6 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable
@@ -56,10 +55,10 @@ LOCAL_PROMPTS = (
 )
 
 
-@dataclass
 class HttpResult:
-    status: int
-    body: bytes
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = int(status)
+        self.body = body
 
     def json(self) -> Any:
         return json.loads(self.body.decode("utf-8"))
