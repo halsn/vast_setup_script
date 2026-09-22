@@ -55,6 +55,17 @@ def job_dir(root: Path, job_id: str) -> Path:
 def alive(pid: int | None) -> bool:
     if not isinstance(pid, int) or pid <= 0:
         return False
+    # A detached child that exited before its parent observed it can remain as
+    # a zombie briefly. kill(pid, 0) still succeeds for zombies, so inspect
+    # procfs first on Linux and treat Z as terminal.
+    stat = Path(f"/proc/{pid}/stat")
+    if stat.is_file():
+        try:
+            fields = stat.read_text(encoding="utf-8", errors="replace").split()
+            if len(fields) >= 3 and fields[2] == "Z":
+                return False
+        except OSError:
+            pass
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -202,7 +213,15 @@ def start(root: Path, job_id: str, execute: bool, smoke_bin: str) -> dict:
         },
     )
     process = subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), "_run", "--job-id", job_id, "--job-root", str(root)],
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--job-root",
+            str(root),
+            "_run",
+            "--job-id",
+            job_id,
+        ],
         cwd="/",
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
