@@ -26,7 +26,7 @@ def test_build_prompt_is_exact_two_segment_stock20_relay_eav():
     assert graph["2"]["inputs"]["clip_name"] == module.CLIP
     assert relay["length"] == 192
     assert relay["timing_mode"] == "frames"
-    assert relay["time_ranges"] == "0-63\n64-127\n128-191"
+    assert relay["time_ranges"] == "0-123\n124-183\n184-191"
     assert runner["chain_id"] == "release_smoke_test"
     assert runner["total_duration_seconds"] == 8.0
     assert [runner["width"], runner["height"]] == [512, 288]

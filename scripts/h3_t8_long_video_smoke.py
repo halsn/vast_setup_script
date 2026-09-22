@@ -209,7 +209,7 @@ def build_prompt(chain_id: str, seed: int) -> dict[str, Any]:
                 "local_prompts": LOCAL_PROMPTS,
                 "length": TOTAL_FRAMES,
                 "timing_mode": "frames",
-                "time_ranges": "0-63\n64-127\n128-191",
+                "time_ranges": "0-123\n124-183\n184-191",
                 "math_profile": "paper_v1",
                 "epsilon": 0.1,
                 "allow_gaps": False,
