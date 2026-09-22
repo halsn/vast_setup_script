@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import fcntl
 import json
 import os
@@ -42,6 +43,21 @@ def read_json(path: Path) -> dict:
     return value
 
 
+def validate_request(request: dict, job_id: str) -> None:
+    if request.get("schema") != SCHEMA:
+        raise RuntimeError("job request schema mismatch")
+    if request.get("job_id") != job_id:
+        raise RuntimeError("job request identity mismatch")
+    if not isinstance(request.get("execute"), bool):
+        raise RuntimeError("job request execute flag is invalid")
+    chain_id = request.get("chain_id")
+    if chain_id != "wb_t8_" + job_id[:20]:
+        raise RuntimeError("job request chain identity mismatch")
+    evidence_dir = request.get("evidence_dir")
+    if not isinstance(evidence_dir, str) or not evidence_dir:
+        raise RuntimeError("job request evidence directory is invalid")
+
+
 def job_dir(root: Path, job_id: str) -> Path:
     if not JOB_RE.fullmatch(job_id):
         raise ValueError("job id must be 32 lowercase hex characters")
@@ -78,7 +94,11 @@ def alive(pid: int | None) -> bool:
 def tail_lines(path: Path, count: int) -> list[str]:
     if not path.is_file() or count <= 0:
         return []
-    return path.read_text(encoding="utf-8", errors="replace").splitlines()[-count:]
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            return [line.rstrip("\r\n") for line in deque(handle, maxlen=count)]
+    except OSError:
+        return []
 
 
 def status(root: Path, job_id: str, tail: int = 80) -> dict:
@@ -95,6 +115,7 @@ def status(root: Path, job_id: str, tail: int = 80) -> dict:
             "log_tail": tail_lines(target / "job.log", tail),
         }
     request = read_json(request_path)
+    validate_request(request, job_id)
     result_path = target / "result.json"
 
     def read_pid(name: str) -> int | None:
@@ -161,6 +182,8 @@ def write_result(target: Path, state: str, code: int, message: str, summary=None
     atomic_json(
         target / "result.json",
         {
+            "schema": SCHEMA,
+            "job_id": target.name,
             "state": state,
             "returncode": int(code),
             "message": message,
@@ -173,6 +196,7 @@ def write_result(target: Path, state: str, code: int, message: str, summary=None
 def run_job(root: Path, job_id: str) -> int:
     target = job_dir(root, job_id)
     request = read_json(target / "request.json")
+    validate_request(request, job_id)
     execute = bool(request["execute"])
     smoke = str(request["smoke_bin"])
     (target / "pid").write_text(str(os.getpid()) + "\n", encoding="utf-8")
@@ -255,6 +279,7 @@ def start(root: Path, job_id: str, execute: bool, smoke_bin: str) -> dict:
     target = job_dir(root, job_id)
     if target.exists():
         request = read_json(target / "request.json")
+        validate_request(request, job_id)
         if bool(request.get("execute")) is not bool(execute):
             raise RuntimeError("existing job id uses a different execution mode")
         return status(root, job_id)
