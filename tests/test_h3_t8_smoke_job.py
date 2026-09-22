@@ -207,7 +207,7 @@ def test_paid_lock_survives_controller_loss_via_detached_child(tmp_path):
     second = wait_terminal(module, root, second_id)
     assert second["state"] == "failed"
     assert second["returncode"] == 75
-    assert "already owns the global lock" in second["message"]
+    assert "another paid T8 validation is running" in second["message"]
 
     first = wait_terminal(module, root, first_id, timeout=4)
     assert first["state"] == "completed"
