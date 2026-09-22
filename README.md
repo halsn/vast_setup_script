@@ -257,6 +257,25 @@ python scripts/h3_studio_smoke.py --generate
 `H3_TIMELINE_MODEL_VARIANT=native`，smoke 时对应传 `--timeline-model native`。
 `--generate` 会真实占用 GPU，并可能产生 Vast 租机费用，因此 CI 和部署脚本都不会自动执行它。需要保留测试工作区时加 `--keep-workspace`。
 
+Open Studio 部署还会安装一个专门针对 T8 Long Video + Prompt Relay + EAV 的固定验收命令：
+
+```bash
+# 只检查节点/模型注册，不提交 GPU 任务
+h3-t8-long-video-smoke
+
+# 显式付费 GPU 验收
+h3-t8-long-video-smoke --execute
+```
+
+GPU 模式固定使用 **8 秒 / 512×288 / 192 帧 / Stock20 / 124 帧窗口 / 22 帧上下文**。
+Relay 时间线使用 `0-123 / 124-183 / 184-191`，第一处事件边界正好落在长视频续接边界。
+脚本会等待第 1 段被接受后，只中断自己拥有的唯一 ComfyUI 任务，保存
+manifest、candidate、context、effects audit 与 authoritative history 证据，再以完全相同
+chain/contract 重新排队并要求原生 resume 完成第 2 段。最终必须通过两段 Relay/EAV
+audit、首段字节不变、192 帧/24fps/512×288/H.264+audio 的 ffprobe 检查和 FFmpeg
+严格解码。该结果只证明机械执行、持久化和恢复合同，接缝观感、音频连续性、身份一致性
+与时序语义仍需要人工观看验收。
+
 ## 共享 Refine / 生成后高清增强
 
 所有用户可选 H3 profile 默认安装固定版本的 3D latent 二采节点与 FP16 checkpoint，同时安装固定版本的 `ComfyUi-MpiNodes`。其中 `MpiSaveLatent` / `MpiLoadLatent` 可以正确保存和恢复 MiniMax H3 的 packed 视频+音频 Latent。
