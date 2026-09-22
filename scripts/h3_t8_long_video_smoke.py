@@ -143,6 +143,40 @@ def discover_comfy_root(explicit: str | None = None) -> Path:
     )
 
 
+def discover_output_root(comfy_root: Path, explicit: str | None = None) -> Path:
+    if explicit:
+        output = Path(explicit).resolve()
+        output.mkdir(parents=True, exist_ok=True)
+        return output
+
+    proc = Path("/proc")
+    if proc.is_dir():
+        for entry in proc.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes()
+                args = [part.decode("utf-8", "replace") for part in raw.split(b"\\0") if part]
+                cwd = (entry / "cwd").resolve()
+            except (OSError, PermissionError):
+                continue
+            if cwd != comfy_root or not any(arg.endswith("main.py") for arg in args):
+                continue
+            for index, arg in enumerate(args):
+                value: str | None = None
+                if arg == "--output-directory" and index + 1 < len(args):
+                    value = args[index + 1]
+                elif arg.startswith("--output-directory="):
+                    value = arg.split("=", 1)[1]
+                if value:
+                    candidate = Path(value)
+                    if not candidate.is_absolute():
+                        candidate = cwd / candidate
+                    return candidate.resolve()
+
+    return (comfy_root / "output").resolve()
+
+
 def build_prompt(chain_id: str, seed: int) -> dict[str, Any]:
     if not chain_id or len(chain_id) > 96 or any(
         not (char.isalnum() or char in "_-") for char in chain_id
@@ -213,11 +247,11 @@ def build_prompt(chain_id: str, seed: int) -> dict[str, Any]:
                 "shift_audio": 3.0,
                 "sampler_name": "dual_clock_euler",
                 "scheduler": "native_flow",
-                "task_type": "T2VA",
+                "task_type": "auto",
                 "context_audio": "video_and_audio",
                 "audio_mode": "native",
                 "audio_denoise_strength": 0.35,
-                "add_source_as_reference": False,
+                "add_source_as_reference": True,
                 "prompt_primary_audio_ordinal": 0,
                 "strict_prompt_tags": True,
                 "ref_image_size": "match",
@@ -332,7 +366,7 @@ def wait_for(
             value = predicate()
             if value:
                 return value
-        except (OSError, json.JSONDecodeError, RuntimeError) as exc:
+            except (OSError, json.JSONDecodeError) as exc:
             last_error = exc
         time.sleep(interval)
     detail = f"; last error: {last_error}" if last_error else ""
@@ -384,9 +418,9 @@ def history_terminal_kind(record: dict[str, Any]) -> str:
     return "unknown"
 
 
-def chain_root(comfy_root: Path, chain_id: str) -> Path:
-    root = (comfy_root / "output" / STATE_FOLDER / chain_id).resolve()
-    output = (comfy_root / "output").resolve()
+def chain_root(output_root: Path, chain_id: str) -> Path:
+    output = output_root.resolve()
+    root = (output / STATE_FOLDER / chain_id).resolve()
     if output not in root.parents:
         raise RuntimeError("Resolved chain path escaped ComfyUI output")
     return root
@@ -584,6 +618,8 @@ def verify_final_media(root: Path, state: dict[str, Any], evidence_dir: Path) ->
     if len(videos) != 1 or len(audios) != 1:
         raise RuntimeError("Final T8 smoke video must contain one video and one audio stream")
     video = videos[0]
+    if video.get("codec_name") != "h264":
+        raise RuntimeError("Final T8 smoke video codec is not H.264")
     if (video.get("width"), video.get("height")) != (WIDTH, HEIGHT):
         raise RuntimeError("Final T8 smoke video geometry mismatch")
     if int(video.get("nb_read_frames", -1)) != TOTAL_FRAMES:
@@ -641,14 +677,14 @@ def verify_final_media(root: Path, state: dict[str, Any], evidence_dir: Path) ->
 def run_smoke(
     *,
     comfy_url: str,
-    comfy_root: Path,
+    output_root: Path,
     chain_id: str,
     seed: int,
     timeout: float,
     evidence_dir: Path,
 ) -> dict[str, Any]:
     assert_queue_idle(comfy_url)
-    root = chain_root(comfy_root, chain_id)
+    root = chain_root(output_root, chain_id)
     if root.exists():
         raise RuntimeError(
             f"Chain already exists: {root}. Use a new --chain-id to avoid reusing evidence."
@@ -810,6 +846,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="ComfyUI checkout/root. Auto-detected on the Vast image when omitted.",
     )
     parser.add_argument(
+        "--output-root",
+        help="ComfyUI output directory. Auto-detected from the running process when omitted.",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="actually submit GPU work, interrupt after segment 1, then resume",
@@ -835,9 +875,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     comfy_root = discover_comfy_root(args.comfy_root)
+    output_root = discover_output_root(comfy_root, args.output_root)
     catalog = request(_url(args.comfy_url, "/object_info"), timeout=60).json()
     validate_object_catalog(catalog)
     print(f"[OK] ComfyUI root: {comfy_root}")
+    print(f"[OK] ComfyUI output: {output_root}")
     print("[OK] T8 Long Video + Prompt Relay + EAV nodes/models are registered")
 
     if not args.execute:
@@ -860,7 +902,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     result = run_smoke(
         comfy_url=args.comfy_url,
-        comfy_root=comfy_root,
+        output_root=output_root,
         chain_id=chain_id,
         seed=args.seed,
         timeout=args.timeout,
