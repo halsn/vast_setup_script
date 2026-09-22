@@ -129,6 +129,28 @@ def validate_paid_summary(summary: dict, chain_id: str) -> None:
         duration = media.get("duration_seconds")
         if not isinstance(duration, (int, float)) or abs(float(duration) - 8.0) > 0.1:
             errors.append("media.duration_seconds")
+        view = media.get("comfyui_view")
+        if not isinstance(view, dict):
+            errors.append("media.comfyui_view")
+        else:
+            filename = view.get("filename")
+            subfolder = view.get("subfolder")
+            if (
+                not isinstance(filename, str)
+                or not filename
+                or "/" in filename
+                or "\\" in filename
+                or filename in {".", ".."}
+            ):
+                errors.append("media.comfyui_view.filename")
+            if not isinstance(subfolder, str):
+                errors.append("media.comfyui_view.subfolder")
+            else:
+                parts = [part for part in subfolder.replace("\\", "/").split("/") if part]
+                if subfolder.startswith(("/", "\\")) or ".." in parts:
+                    errors.append("media.comfyui_view.subfolder")
+            if view.get("type") != "output":
+                errors.append("media.comfyui_view.type")
 
     if errors:
         raise RuntimeError(
