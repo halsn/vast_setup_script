@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)
 # The Workbench may intentionally fetch this entry script from a moving branch.
 # Pin every companion script it downloads so the recorded entry-script digest
 # still identifies a deterministic deployment dependency set.
-H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-6a7892e467d6b644c1267f233e7d556628aaa489}"
+H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-708bed8034d80515a9df63e7a1f46bca96188cca}"
 H3_PROFILE_COMMON_URL="${H3_PROFILE_COMMON_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh}"
 H3_PROFILE_BASE_URL="${H3_PROFILE_BASE_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh}"
 COMMON="${SCRIPT_DIR:+$SCRIPT_DIR/h3_profile_common.sh}"
