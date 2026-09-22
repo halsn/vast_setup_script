@@ -136,6 +136,38 @@ def test_validate_final_report_requires_relay_and_eav_on_both_segments(tmp_path)
     assert module.validate_final_report(tmp_path) == report
 
 
+def test_add_comfyui_view_exposes_relative_output_receipt(tmp_path):
+    module = load_module()
+    output = tmp_path / "output"
+    video = output / "minimax_h3_t8_long_video" / "chain" / "assembled" / "final.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+
+    media = module.add_comfyui_view({"path": str(video), "frames": 192}, output)
+
+    assert media["frames"] == 192
+    assert media["comfyui_view"] == {
+        "filename": "final.mp4",
+        "subfolder": "minimax_h3_t8_long_video/chain/assembled",
+        "type": "output",
+    }
+
+
+def test_add_comfyui_view_rejects_media_outside_output_root(tmp_path):
+    module = load_module()
+    output = tmp_path / "output"
+    output.mkdir()
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"x")
+
+    try:
+        module.add_comfyui_view({"path": str(outside)}, output)
+    except RuntimeError as exc:
+        assert "outside the ComfyUI output directory" in str(exc)
+    else:
+        raise AssertionError("review media outside output root must be rejected")
+
+
 def test_discover_output_root_accepts_explicit_path(tmp_path):
     module = load_module()
     output = tmp_path / "custom-output"
