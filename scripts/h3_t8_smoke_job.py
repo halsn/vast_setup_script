@@ -215,8 +215,20 @@ def run_job(root: Path, job_id: str) -> int:
             returncode = int(child.wait())
             summary = None
             evidence = Path(str(request["evidence_dir"])) / "result.json"
-            if execute and returncode == 0 and evidence.is_file():
+            if execute and returncode == 0:
+                if not evidence.is_file():
+                    returncode = 74
+                    message = "paid T8 smoke exited zero without atomic evidence result"
+                    write_result(target, "failed", returncode, message)
+                    print(f"[JOB] {message}", file=log, flush=True)
+                    return returncode
                 summary = read_json(evidence)
+                if summary.get("status") != "passed":
+                    returncode = 74
+                    message = "paid T8 smoke evidence did not report status=passed"
+                    write_result(target, "failed", returncode, message, summary)
+                    print(f"[JOB] {message}", file=log, flush=True)
+                    return returncode
             state = "completed" if returncode == 0 else "failed"
             message = (
                 "T8 validation completed"
