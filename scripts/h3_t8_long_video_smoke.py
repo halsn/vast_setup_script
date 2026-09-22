@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 QUALIFICATION_ID = "h3.t8.stock20-relay-eav-8s.v1"
+T8_REVISION = "2657a6ddf4143998be16d55d24fb03ac0cc5a794"
+H3_MODEL_REVISION = "0bd506d2e895983a9663037febda27aa3948cf48"
 FPS = 24
 TOTAL_FRAMES = 192
 WIDTH = 512
@@ -44,6 +46,28 @@ VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
 AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
 LOOP_NODE = "MiniMaxH3LongVideoInNodeLoopEffectsT8Advanced"
 RELAY_NODE = "MiniMaxH3PromptRelayPlanT8Advanced"
+MODEL_IDENTITIES = {
+    "unet": {
+        "relative_path": f"diffusion_models/{UNET}",
+        "bytes": 20970379616,
+        "sha256": "e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a",
+    },
+    "clip": {
+        "relative_path": f"text_encoders/{CLIP}",
+        "bytes": 15687142551,
+        "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+    },
+    "video_vae": {
+        "relative_path": f"vae/{VIDEO_VAE}",
+        "bytes": 5207808496,
+        "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+    },
+    "audio_vae": {
+        "relative_path": f"vae/{AUDIO_VAE}",
+        "bytes": 605254808,
+        "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+    },
+}
 GLOBAL_PROMPT = (
     "A single continuous cinematic studio shot of the same glossy red cube on a "
     "neutral table. Preserve the cube, lighting, camera direction, room tone and "
@@ -271,6 +295,83 @@ def build_prompt(chain_id: str, seed: int) -> dict[str, Any]:
             },
         },
     }
+
+
+def _git_capture(root: Path, *args: str) -> str:
+    process = subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if process.returncode != 0:
+        detail = process.stderr.strip() or process.stdout.strip()
+        raise RuntimeError(
+            f"Could not inspect pinned T8 checkout at {root}"
+            + (f": {detail[:1000]}" if detail else "")
+        )
+    return process.stdout.strip()
+
+
+def verify_runtime_identity(
+    comfy_root: Path,
+    *,
+    hash_models: bool,
+) -> dict[str, Any]:
+    """Bind a paid release result to the exact T8 checkout and official model files."""
+    t8_root = comfy_root / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    if not (t8_root / ".git").is_dir():
+        raise RuntimeError(f"Pinned T8 checkout is missing or not a git checkout: {t8_root}")
+    revision = _git_capture(t8_root, "rev-parse", "HEAD")
+    if revision != T8_REVISION:
+        raise RuntimeError(
+            f"T8 revision mismatch: expected {T8_REVISION}, got {revision or 'empty'}"
+        )
+    tracked_changes = _git_capture(
+        t8_root,
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+    )
+    if tracked_changes:
+        raise RuntimeError(
+            "Pinned T8 checkout has tracked modifications; release qualification requires a clean checkout"
+        )
+
+    identity: dict[str, Any] = {
+        "t8_revision": revision,
+        "h3_model_revision": H3_MODEL_REVISION,
+        "models_verified": bool(hash_models),
+        "models": {},
+    }
+    if not hash_models:
+        return identity
+
+    model_root = comfy_root / "models"
+    for name, spec in MODEL_IDENTITIES.items():
+        relative = str(spec["relative_path"])
+        path = model_root / relative
+        if not path.is_file():
+            raise RuntimeError(f"Required release model is missing: {relative}")
+        size = path.stat().st_size
+        expected_size = int(spec["bytes"])
+        if size != expected_size:
+            raise RuntimeError(
+                f"Release model size mismatch for {relative}: expected {expected_size}, got {size}"
+            )
+        digest = sha256_file(path)
+        expected_sha = str(spec["sha256"])
+        if digest != expected_sha:
+            raise RuntimeError(
+                f"Release model SHA-256 mismatch for {relative}: expected {expected_sha}, got {digest}"
+            )
+        identity["models"][name] = {
+            "relative_path": relative,
+            "bytes": size,
+            "sha256": digest,
+        }
+    return identity
 
 
 def validate_object_catalog(catalog: dict[str, Any]) -> None:
@@ -716,6 +817,7 @@ def run_smoke(
     seed: int,
     timeout: float,
     evidence_dir: Path,
+    runtime_identity: dict[str, Any],
 ) -> dict[str, Any]:
     assert_queue_idle(comfy_url)
     root = chain_root(output_root, chain_id)
@@ -866,6 +968,7 @@ def run_smoke(
             "mechanical two-segment Stock20 Prompt Relay + EAV interrupt/resume smoke; "
             "human seam/audio/semantic quality review remains separate"
         ),
+        "runtime_identity": runtime_identity,
         "chain_id": chain_id,
         "first_prompt_id": first_prompt,
         "resume_prompt_id": second_prompt,
@@ -934,9 +1037,16 @@ def main(argv: list[str] | None = None) -> int:
     output_root = discover_output_root(comfy_root, args.output_root)
     catalog = request(_url(args.comfy_url, "/object_info"), timeout=60).json()
     validate_object_catalog(catalog)
+    runtime_identity = verify_runtime_identity(
+        comfy_root,
+        hash_models=args.execute,
+    )
     print(f"[OK] ComfyUI root: {comfy_root}")
     print(f"[OK] ComfyUI output: {output_root}")
+    print(f"[OK] pinned T8 revision: {runtime_identity['t8_revision']}")
     print("[OK] T8 Long Video + Prompt Relay + EAV nodes/models are registered")
+    if args.execute:
+        print("[OK] release model bytes and SHA-256 match the pinned H3 model snapshot")
 
     if not args.execute:
         print(
@@ -963,6 +1073,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         timeout=args.timeout,
         evidence_dir=evidence_dir,
+        runtime_identity=runtime_identity,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     print(f"[OK] evidence: {evidence_dir}")
