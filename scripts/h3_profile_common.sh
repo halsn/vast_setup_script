@@ -79,6 +79,36 @@ h3_profile_install_node() {
   h3_profile_install_requirements "$COMFY_DIR/custom_nodes/$name"
 }
 
+h3_profile_install_pinned_node() {
+  local name="$1" repo="$2" revision="$3"
+  local node_dir="$COMFY_DIR/custom_nodes/$name" node_root actual_rev
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] \
+    || { h3_profile_error "Pinned custom node revision must be a full 40-character commit: $revision"; return 1; }
+  mkdir -p "$COMFY_DIR/custom_nodes"
+  if [[ -e "$node_dir" ]]; then
+    [[ -d "$node_dir" ]] \
+      || { h3_profile_error "Existing custom node path is not a git checkout: $node_dir"; return 1; }
+    node_root="$(git -C "$node_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+    [[ -n "$node_root" && "$(cd "$node_dir" && pwd -P)" == "$(cd "$node_root" && pwd -P)" ]] \
+      || { h3_profile_error "Existing custom node path is not a git checkout: $node_dir"; return 1; }
+    [[ -z "$(git -C "$node_dir" status --porcelain --untracked-files=all)" ]] \
+      || { h3_profile_error "Refusing to update dirty custom node checkout: $node_dir"; return 1; }
+  else
+    git clone --filter=blob:none "$repo" "$node_dir"
+  fi
+
+  actual_rev="$(git -C "$node_dir" rev-parse HEAD 2>/dev/null || true)"
+  if [[ "$actual_rev" != "$revision" ]]; then
+    git -C "$node_dir" fetch --depth=1 "$repo" "$revision"
+    git -C "$node_dir" checkout --detach "$revision"
+    actual_rev="$(git -C "$node_dir" rev-parse HEAD)"
+    [[ "$actual_rev" == "$revision" ]] \
+      || { h3_profile_error "$name revision mismatch: $actual_rev"; return 1; }
+  fi
+  h3_profile_install_requirements "$node_dir"
+  h3_profile_info "$name pinned at $revision."
+}
+
 h3_profile_install_video_helper_suite() {
   local node_dir="$COMFY_DIR/custom_nodes/$VHS_NODE_NAME" actual_rev
   mkdir -p "$COMFY_DIR/custom_nodes"
@@ -251,6 +281,34 @@ if missing:
     raise SystemExit(1)
 
 print("[OK] Shared H3 Refine and MPI latent persistence nodes are registered", file=sys.stderr)
+PY
+}
+
+h3_profile_verify_t8_prompt_enhancer() {
+  local object_info_url="http://127.0.0.1:${COMFY_PORT}/object_info"
+  "$COMFY_PYTHON" - "$object_info_url" <<'PY'
+import json
+import sys
+import urllib.request
+
+url = sys.argv[1]
+required = ("MiniMaxH3PromptEnhancerT8", "T8ShowText")
+try:
+    with urllib.request.urlopen(url, timeout=20) as response:
+        catalog = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI object catalog: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+missing = [name for name in required if name not in catalog]
+if missing:
+    print(
+        "[ERROR] ComfyUI did not register T8 Prompt Enhancer nodes: " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print("[OK] T8 Prompt Enhancer nodes are registered", file=sys.stderr)
 PY
 }
 

@@ -1,5 +1,7 @@
-from pathlib import Path
 import json
+import os
+from pathlib import Path
+import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,14 +13,31 @@ PROFILE_SCRIPTS = [
     "scripts/setupp_h3_comfui_fasth3.sh",
 ]
 STUDIO_SCRIPT = "scripts/setupp_h3_studio.sh"
-SCRIPTS = ["scripts/h3_profile_common.sh", *PROFILE_SCRIPTS, STUDIO_SCRIPT]
+NATIVE_SCRIPT = "scripts/setupp_h3_comfui.sh"
+SCRIPTS = ["scripts/h3_profile_common.sh", *PROFILE_SCRIPTS, NATIVE_SCRIPT, STUDIO_SCRIPT]
+
+
+def _bash_executable():
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            candidate = Path(git).resolve().parents[1] / "bin" / "bash.exe"
+            if candidate.is_file():
+                return str(candidate)
+    bash = shutil.which("bash")
+    if not bash:
+        raise RuntimeError("Bash is required to validate H3 setup scripts")
+    return bash
+
+
+BASH = _bash_executable()
 
 
 def test_h3_profile_scripts_are_flat_and_parse():
     for rel in SCRIPTS:
         path = ROOT / rel
         assert path.is_file(), rel
-        subprocess.run(["bash", "-n", str(path)], check=True)
+        subprocess.run([BASH, "-n", str(path)], check=True)
 
 
 def test_no_experimental_script_directory():
@@ -53,6 +72,19 @@ def test_cache_profile_owns_cache_implementation():
     assert "h3_profile_common.sh" in text
     assert "ComfyUI-Spectrum-MiniMax-H3" in text
     assert "ComfyUI-MiniMaxH3-FirstBlockCache" in text
+
+
+def test_t8_prompt_enhancer_is_installed_only_by_native_profile():
+    native = (ROOT / NATIVE_SCRIPT).read_text()
+    assert 'H3_MIN_COMFYUI_VERSION="0.33.0"' in native
+    install = native.index("h3_profile_install_pinned_node")
+    finish = native.index("h3_profile_finish")
+    verify = native.index("h3_profile_verify_t8_prompt_enhancer")
+    assert install < finish < verify
+
+    for rel in [*PROFILE_SCRIPTS, STUDIO_SCRIPT]:
+        text = (ROOT / rel).read_text()
+        assert "comfyui-minimax-h3-prompt-enhancer-T8.git" not in text, rel
 
 
 def test_open_source_studio_profile_is_pinned_and_health_checked():

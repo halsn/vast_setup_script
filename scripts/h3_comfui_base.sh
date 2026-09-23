@@ -607,16 +607,16 @@ update_git_checkout() {
 update_comfyui() {
   H3_STAGE="updating ComfyUI"
   if use_vast_comfy_base; then
-    local current
+    local current min_version="${H3_MIN_COMFYUI_VERSION:-0.30.0}"
     current="$(get_comfyui_version 2>/dev/null || true)"
-    if [[ -n "$current" ]] && version_at_least "$current" "0.30.0"; then
+    if [[ -n "$current" ]] && version_at_least "$current" "$min_version"; then
       log_info "Vast.ai ComfyUI base detected with ComfyUI $current; core update skipped."
       return 0
     fi
     if [[ "${H3_SKIP_UPGRADE:-0}" == "1" ]]; then
-      die "ComfyUI ${current:-unknown} is below 0.30.0; unset H3_SKIP_UPGRADE so the core can be updated."
+      die "ComfyUI ${current:-unknown} is below $min_version; unset H3_SKIP_UPGRADE so the core can be updated."
     fi
-    log_warn "Vast.ai ComfyUI base has ComfyUI ${current:-unknown}; updating to satisfy MiniMax H3 >=0.30.0."
+    log_warn "Vast.ai ComfyUI base has ComfyUI ${current:-unknown}; updating to satisfy MiniMax H3 >=$min_version."
   fi
   if [[ "${H3_SKIP_UPGRADE:-0}" == "1" ]]; then
     log_warn "H3_SKIP_UPGRADE=1; ComfyUI core update skipped."
@@ -909,10 +909,10 @@ PY
 }
 
 ensure_comfyui_version() {
-  local current
+  local current min_version="${H3_MIN_COMFYUI_VERSION:-0.30.0}"
   current="$(get_comfyui_version 2>/dev/null || true)"
   [[ -n "$current" ]] || die "Could not determine ComfyUI core version after update."
-  version_at_least "$current" "0.30.0" || die "ComfyUI $current is too old; MiniMax H3 requires 0.30.0 or later."
+  version_at_least "$current" "$min_version" || die "ComfyUI $current is too old; MiniMax H3 requires $min_version or later."
   log_ok "ComfyUI core version: $current"
 }
 

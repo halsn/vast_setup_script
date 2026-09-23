@@ -3,6 +3,9 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"
 COMMON="${SCRIPT_DIR:+$SCRIPT_DIR/h3_profile_common.sh}"
+T8_PROMPT_ENHANCER_NODE="ComfyUI-MiniMax-H3-Prompt-Enhancer-T8"
+T8_PROMPT_ENHANCER_REPO="https://github.com/T8mars/comfyui-minimax-h3-prompt-enhancer-T8.git"
+T8_PROMPT_ENHANCER_REV="4fdab875fe2132168a26ccdc0527076e89c479e3"
 COMMON_TMP=""
 if [[ ! -f "$COMMON" ]]; then
   COMMON_TMP="$(mktemp)"
@@ -43,8 +46,12 @@ main_native() {
       ;;
   esac
 
+  H3_MIN_COMFYUI_VERSION="0.33.0"
+  export H3_MIN_COMFYUI_VERSION
   h3_profile_prepare_base
+  h3_profile_install_pinned_node "$T8_PROMPT_ENHANCER_NODE" "$T8_PROMPT_ENHANCER_REPO" "$T8_PROMPT_ENHANCER_REV"
   h3_profile_finish
+  h3_profile_verify_t8_prompt_enhancer
   h3_profile_info "H3 Native profile ready (shared Refine + packed AV latent persistence enabled by default)."
 }
 
