@@ -87,6 +87,17 @@ def test_t8_prompt_enhancer_is_installed_only_by_native_profile():
         assert "comfyui-minimax-h3-prompt-enhancer-T8.git" not in text, rel
 
 
+def test_t8_blockcache_is_installed_only_by_native_profile():
+    native = (ROOT / NATIVE_SCRIPT).read_text()
+    assert 'T8_BLOCKCACHE_REV="36336dcee1ecb49a5ee98426456aeb353c8535bd"' in native
+    assert 'h3_profile_install_pinned_node "$T8_BLOCKCACHE_NODE" "$T8_BLOCKCACHE_REPO" "$T8_BLOCKCACHE_REV"' in native
+    assert "h3_profile_verify_t8_blockcache" in native
+
+    for rel in [*PROFILE_SCRIPTS, STUDIO_SCRIPT]:
+        text = (ROOT / rel).read_text()
+        assert "comfyui-minimax-h3-blockcache-T8.git" not in text, rel
+
+
 def test_open_source_studio_profile_is_pinned_and_health_checked():
     text = (ROOT / STUDIO_SCRIPT).read_text()
     assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-708bed8034d80515a9df63e7a1f46bca96188cca}"' in text

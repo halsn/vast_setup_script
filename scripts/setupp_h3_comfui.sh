@@ -6,6 +6,9 @@ COMMON="${SCRIPT_DIR:+$SCRIPT_DIR/h3_profile_common.sh}"
 T8_PROMPT_ENHANCER_NODE="ComfyUI-MiniMax-H3-Prompt-Enhancer-T8"
 T8_PROMPT_ENHANCER_REPO="https://github.com/T8mars/comfyui-minimax-h3-prompt-enhancer-T8.git"
 T8_PROMPT_ENHANCER_REV="4fdab875fe2132168a26ccdc0527076e89c479e3"
+T8_BLOCKCACHE_NODE="comfyui-minimax-h3-blockcache-T8"
+T8_BLOCKCACHE_REPO="https://github.com/T8mars/comfyui-minimax-h3-blockcache-T8.git"
+T8_BLOCKCACHE_REV="36336dcee1ecb49a5ee98426456aeb353c8535bd"
 COMMON_TMP=""
 if [[ ! -f "$COMMON" ]]; then
   COMMON_TMP="$(mktemp)"
@@ -50,8 +53,10 @@ main_native() {
   export H3_MIN_COMFYUI_VERSION
   h3_profile_prepare_base
   h3_profile_install_pinned_node "$T8_PROMPT_ENHANCER_NODE" "$T8_PROMPT_ENHANCER_REPO" "$T8_PROMPT_ENHANCER_REV"
+  h3_profile_install_pinned_node "$T8_BLOCKCACHE_NODE" "$T8_BLOCKCACHE_REPO" "$T8_BLOCKCACHE_REV"
   h3_profile_finish
   h3_profile_verify_t8_prompt_enhancer
+  h3_profile_verify_t8_blockcache
   h3_profile_info "H3 Native profile ready (shared Refine + packed AV latent persistence enabled by default)."
 }
 

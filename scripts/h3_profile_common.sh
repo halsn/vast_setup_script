@@ -312,6 +312,33 @@ print("[OK] T8 Prompt Enhancer nodes are registered", file=sys.stderr)
 PY
 }
 
+h3_profile_verify_t8_blockcache() {
+  local object_info_url="http://127.0.0.1:${COMFY_PORT}/object_info"
+  "$COMFY_PYTHON" - "$object_info_url" <<'PY'
+import json
+import sys
+import urllib.request
+
+url = sys.argv[1]
+required = "MiniMaxH3BlockCacheT8"
+try:
+    with urllib.request.urlopen(url, timeout=20) as response:
+        catalog = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI object catalog: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if required not in catalog:
+    print(
+        "[ERROR] ComfyUI did not register T8 BlockCache node: " + required,
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print("[OK] T8 BlockCache node is registered", file=sys.stderr)
+PY
+}
+
 h3_profile_ensure_hf() {
   if ! "$COMFY_PYTHON" - <<'PY' >/dev/null 2>&1
 import huggingface_hub
