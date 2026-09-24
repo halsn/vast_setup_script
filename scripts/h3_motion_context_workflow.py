@@ -90,17 +90,23 @@ def prepare_workflow(source):
                                if any(link[0] == link_id for link in links)] or None
     model_loader["widgets_values"][0] = UNET
     model_loader["widgets_values"][1] = CLIP
+    model_loader["widgets_values_named"]["unet_name"] = UNET
+    model_loader["widgets_values_named"]["clip_name"] = CLIP
     image_to_video = nodes[roots[0]]
     image_to_video["widgets_values"][-1] = 73
+    image_to_video["widgets_values_named"]["length"] = 73
     context = next(node for node in nodes.values() if node["id"] in kept
                    and node["type"] == "MiniMaxH3MotionContext")
     context["widgets_values"] = ["22", 24]
+    context["widgets_values_named"].update(context_length="22", audio_context_length=24)
     trim = next(node for node in nodes.values() if node["id"] in kept
                 and node["type"] == "MiniMaxH3MotionContextTrim")
     trim["widgets_values"][1] = 24
+    trim["widgets_values_named"]["fps"] = 24
     chain = next(node for node in nodes.values() if node["id"] in kept
                  and node["type"] == "MiniMaxH3MotionContextChain")
     chain["widgets_values"] = [2]
+    chain["widgets_values_named"]["segments"] = 2
 
     audio_link = next(link for link in links if link[1] == sampler["id"]
                       and link[3] == trim["id"] and link[5] == "AUDIO")
@@ -125,6 +131,7 @@ def prepare_workflow(source):
         "outputs": [{"name": "audio", "type": "AUDIO", "links": [probe_out_id]},
                     {"name": "report", "type": "STRING", "links": None}],
         "properties": {"Node name for S&R": PROBE_TYPE}, "widgets_values": [24.0, 50.0, 40.0],
+        "widgets_values_named": {"fps": 24.0, "window_ms": 50.0, "search_ms": 40.0},
     }
     audio_link[0] = probe_in_id
     sampler_audio = next(o for o in sampler["outputs"] if o["name"] == "AUDIO")
@@ -147,6 +154,24 @@ def prepare_workflow(source):
     workflow["links"] = links
     workflow["groups"] = [g for g in workflow["groups"] if g["title"] in {
         "MiniMax H3 FL2VA", "FL2VA Motion Context"}]
+    definitions = workflow["definitions"]["subgraphs"]
+    by_definition = {item["id"]: item for item in definitions}
+    required = {node["type"] for node in workflow["nodes"] if node["type"] in by_definition}
+    pending = list(required)
+    while pending:
+        for node in by_definition[pending.pop()]["nodes"]:
+            if node["type"] in by_definition and node["type"] not in required:
+                required.add(node["type"])
+                pending.append(node["type"])
+    workflow["definitions"]["subgraphs"] = [item for item in definitions if item["id"] in required]
+    loader_definition = by_definition[model_loader["type"]]
+    for node in loader_definition["nodes"]:
+        if node["type"] == "UNETLoader":
+            node["widgets_values"][0] = UNET
+            node["widgets_values_named"]["unet_name"] = UNET
+        elif node["type"] == "CLIPLoader":
+            node["widgets_values"][0] = CLIP
+            node["widgets_values_named"]["clip_name"] = CLIP
     workflow["last_node_id"] = probe_id
     workflow["last_link_id"] = max(link[0] for link in links)
     return workflow
