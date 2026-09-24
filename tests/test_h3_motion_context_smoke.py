@@ -21,7 +21,7 @@ WORKFLOW_TOOL = ROOT / "scripts" / "h3_motion_context_workflow.py"
 WORKFLOW_SOURCE = ROOT / "tests" / "fixtures" / "h3_motion_context_workflow.json"
 SOURCE = "ComfyUI-H3-Motion-Context"
 TEMPLATE = "h3_motion_context_smoke"
-SMOKE_TOOL_REV = "aaa79b6146c64ebc0b7c1b610fb147c209ac59d4"
+SMOKE_TOOL_REV = "1b74b968563b507e25fa4c70883648e02ccbd2b9"
 WORKFLOW_PATH = f"/api/workflow_templates/{SOURCE}/{TEMPLATE}.json"
 NODE_TYPES = (
     "MiniMaxH3MotionContext",
@@ -187,6 +187,10 @@ def test_preflight_reports_missing_node_template_or_workflow(case, expected_mess
     ("mutation", "expected_message"),
     (("wrong-frame-count", "73"),
      ("missing-seam-link", "clip_a_latent"),
+     ("broken-subgraph-link", "missing node endpoint"),
+     ("wrong-subgraph-link-type", "type"),
+     ("invalid-subgraph-input-slot", "slot"),
+     ("invalid-subgraph-output-slot", "slot"),
      ("missing-contract-node", NODE_TYPES[2]),
      ("bypass-motion-context", "MotionContext.conditioning"),
      ("bypass-trim-images", "MotionContextTrim.images"),
@@ -198,6 +202,21 @@ def test_preflight_rejects_a_workflow_that_breaks_the_smoke_contract(mutation, e
         node = next(n for n in workflow["nodes"] if n["type"] == "MiniMaxH3ImageToVideo")
         node["widgets_values"][-1] = 72
         node["widgets_values_named"]["length"] = 72
+    elif mutation.startswith(("broken-subgraph", "wrong-subgraph", "invalid-subgraph")):
+        subgraph = next(d for d in workflow["definitions"]["subgraphs"]
+                        if d["name"] == "Sampling/Decoding/Create")
+        if mutation == "broken-subgraph-link":
+            subgraph["links"][0]["origin_id"] = 999999
+        elif mutation == "wrong-subgraph-link-type":
+            subgraph["links"][0]["type"] = "BROKEN"
+        elif mutation == "invalid-subgraph-input-slot":
+            link = next(link for link in subgraph["links"]
+                        if link["origin_id"] == subgraph["inputNode"]["id"])
+            link["origin_slot"] = len(subgraph["inputs"])
+        else:
+            link = next(link for link in subgraph["links"]
+                        if link["target_id"] == subgraph["outputNode"]["id"])
+            link["target_slot"] = len(subgraph["outputs"])
     elif mutation == "missing-seam-link":
         probe = next(n for n in workflow["nodes"]
                      if n["type"] == "MiniMaxH3MotionContextSeamProbe")
@@ -329,6 +348,14 @@ def _bash_executable():
     return bash
 
 
+def _bash_path(path, bash):
+    if os.name != "nt":
+        return str(path)
+    result = subprocess.run([bash, "-c", 'cygpath -u "$1"', "path", str(path)],
+                            capture_output=True, text=True, check=True)
+    return result.stdout.strip()
+
+
 def test_join_verifies_inputs_output_and_full_decode_without_shell(tmp_path, monkeypatch):
     tool, fake, paths, argv = _join_case(tmp_path, monkeypatch)
     assert tool.main(argv) == 0
@@ -447,19 +474,25 @@ def test_setup_stages_preflight_tool_when_bootstrap_has_no_sibling_script(
     assert verify_name in text
     install = install_name + text.split(install_name, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
     verify = verify_name + text.split(verify_name, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+    bash = _bash_executable()
     script_dir = tmp_path / "standalone-bootstrap"
     tool_dir = tmp_path / "installed-tools"
     script_dir.mkdir()
     installed_tool = tool_dir / "h3_motion_context_smoke.py"
     expected_url = f"https://raw.githubusercontent.com/halsn/vast_setup_script/{SMOKE_TOOL_REV}/scripts/h3_motion_context_smoke.py"
+    script_dir_arg = shlex.quote(_bash_path(script_dir, bash))
+    tool_dir_arg = shlex.quote(_bash_path(tool_dir, bash))
+    installed_tool_arg = shlex.quote(_bash_path(installed_tool, bash))
+    tool_arg = shlex.quote(_bash_path(TOOL, bash))
+    python_arg = shlex.quote(_bash_path(Path(sys.executable), bash))
     harness = f"""set -Eeuo pipefail
-SCRIPT_DIR={shlex.quote(str(script_dir).replace('\\\\', '/'))}
-H3_T8_SMOKE_TOOL_DIR={shlex.quote(str(tool_dir).replace('\\\\', '/'))}
+SCRIPT_DIR={script_dir_arg}
+H3_T8_SMOKE_TOOL_DIR={tool_dir_arg}
 MOTION_CONTEXT_SMOKE_TOOL_URL={shlex.quote(expected_url)}
 EXPECTED_URL={shlex.quote(expected_url)}
-INSTALLED_TOOL={shlex.quote(str(installed_tool).replace('\\\\', '/'))}
-REAL_TOOL={shlex.quote(str(TOOL).replace('\\\\', '/'))}
-REAL_PYTHON={shlex.quote(sys.executable.replace('\\\\', '/'))}
+INSTALLED_TOOL={installed_tool_arg}
+REAL_TOOL={tool_arg}
+REAL_PYTHON={python_arg}
 COMFY_PYTHON=fake_python
 COMFY_PORT=18188
 FAIL_CURL={'1' if download_fails else '0'}
@@ -502,7 +535,6 @@ else
 fi
 printf 'T8_READY\\n'
 """
-    bash = _bash_executable()
     env = os.environ.copy()
     git_root = Path(bash).resolve().parents[1]
     env["PATH"] = os.pathsep.join((str(git_root / "usr" / "bin"),
