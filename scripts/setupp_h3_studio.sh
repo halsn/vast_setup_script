@@ -37,6 +37,13 @@ T8_LONG_VIDEO_TEMPLATE_ALIAS="h3_t8_long_video_relay"
 T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS="h3_t8_long_video_relay_smoke"
 T8_LONG_VIDEO_UNET_NAME="minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 T8_LONG_VIDEO_CLIP_NAME="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+MOTION_CONTEXT_NODE_NAME="ComfyUI-H3-Motion-Context"
+MOTION_CONTEXT_NODE_REPO="https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context.git"
+MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"
+MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"
+MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"
+MOTION_CONTEXT_WORKFLOW_TOOL_REV="79a59f2f3a49acc332269e3f6498156cf9d21ac3"
+MOTION_CONTEXT_WORKFLOW_TOOL_URL="${MOTION_CONTEXT_WORKFLOW_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_WORKFLOW_TOOL_REV/scripts/h3_motion_context_workflow.py}"
 H3_T8_SMOKE_TOOL_URL="${H3_T8_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py}"
 H3_T8_SMOKE_JOB_TOOL_URL="${H3_T8_SMOKE_JOB_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_smoke_job.py}"
 H3_T8_SMOKE_TOOL_DIR="${H3_T8_SMOKE_TOOL_DIR:-/opt/h3-studio-tools}"
@@ -92,6 +99,7 @@ h3_studio_install_pinned_checkout() {
 h3_studio_install_runtime_nodes() {
   local kj_target="$COMFY_DIR/custom_nodes/$KJ_NODE_NAME"
   local t8_target="$COMFY_DIR/custom_nodes/$T8_NODE_NAME"
+  local motion_target="$COMFY_DIR/custom_nodes/$MOTION_CONTEXT_NODE_NAME"
   mkdir -p "$COMFY_DIR/custom_nodes"
 
   # The Studio enables MiniMaxChunkFeedForward/MiniMaxLowVRAMAttention by
@@ -101,7 +109,29 @@ h3_studio_install_runtime_nodes() {
 
   h3_studio_install_pinned_checkout "$T8_NODE_NAME" "$T8_NODE_REPO" "$T8_NODE_REV" "$t8_target"
   h3_profile_install_requirements "$t8_target"
+  h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"
+  h3_profile_install_requirements "$motion_target"
   h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
+}
+
+h3_studio_install_motion_context_template() {
+  local motion_target="$COMFY_DIR/custom_nodes/$MOTION_CONTEXT_NODE_NAME"
+  local source_template="$motion_target/$MOTION_CONTEXT_TEMPLATE_SOURCE"
+  local alias_template="$motion_target/example_workflows/$MOTION_CONTEXT_TEMPLATE_ALIAS.json"
+  local workflow_tool="$SCRIPT_DIR/h3_motion_context_workflow.py"
+  [[ -f "$source_template" ]] || {
+    h3_profile_error "Motion Context source workflow is missing: $source_template"
+    return 1
+  }
+  if [[ ! -f "$workflow_tool" ]]; then
+    workflow_tool="$(mktemp)"
+    curl -fsSL --retry 3 --connect-timeout 15 "$MOTION_CONTEXT_WORKFLOW_TOOL_URL" -o "$workflow_tool"
+  fi
+  "$COMFY_PYTHON" "$workflow_tool" "$source_template" "$alias_template"
+  if [[ "$workflow_tool" != "$SCRIPT_DIR/h3_motion_context_workflow.py" ]]; then
+    rm -f "$workflow_tool"
+  fi
+  h3_profile_info "Motion Context FL2VA template installed: $MOTION_CONTEXT_TEMPLATE_ALIAS."
 }
 
 h3_studio_install_t8_long_video_template() {
@@ -1051,6 +1081,7 @@ main_studio() {
   h3_studio_configure_timeline_model
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
+  h3_studio_install_motion_context_template
   h3_studio_install_t8_long_video_template
   h3_studio_install_t8_release_smoke_tool
   h3_studio_install_timeline_director

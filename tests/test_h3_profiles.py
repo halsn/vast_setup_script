@@ -33,6 +33,22 @@ def _bash_executable():
 BASH = _bash_executable()
 
 
+def test_motion_context_studio_install_is_pinned_and_prepares_only_its_alias():
+    text = (ROOT / STUDIO_SCRIPT).read_text()
+    assert 'MOTION_CONTEXT_NODE_NAME="ComfyUI-H3-Motion-Context"' in text
+    assert 'MOTION_CONTEXT_NODE_REPO="https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context.git"' in text
+    assert 'MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"' in text
+    assert 'MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"' in text
+    assert 'MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"' in text
+    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="79a59f2f3a49acc332269e3f6498156cf9d21ac3"' in text
+    assert 'h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"' in text
+    assert 'h3_studio_install_motion_context_template' in text
+    assert 'h3_motion_context_workflow.py' in text
+    assert 'h3_profile_install_requirements "$motion_target"' in text
+    assert text.index("  h3_studio_install_runtime_nodes\n") < text.index("  h3_studio_install_motion_context_template\n") < text.index("  h3_profile_finish\n")
+    assert "h3_motion_context_smoke.py" not in text
+
+
 def test_h3_profile_scripts_are_flat_and_parse():
     for rel in SCRIPTS:
         path = ROOT / rel
