@@ -21,7 +21,7 @@ WORKFLOW_TOOL = ROOT / "scripts" / "h3_motion_context_workflow.py"
 WORKFLOW_SOURCE = ROOT / "tests" / "fixtures" / "h3_motion_context_workflow.json"
 SOURCE = "ComfyUI-H3-Motion-Context"
 TEMPLATE = "h3_motion_context_smoke"
-SMOKE_TOOL_REV = "1b74b968563b507e25fa4c70883648e02ccbd2b9"
+SMOKE_TOOL_REV = "6aea2d5aa0e209484d1529b6fd213e7c23db6189"
 WORKFLOW_PATH = f"/api/workflow_templates/{SOURCE}/{TEMPLATE}.json"
 NODE_TYPES = (
     "MiniMaxH3MotionContext",

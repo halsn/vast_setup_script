@@ -40,7 +40,7 @@ def test_motion_context_studio_install_is_pinned_and_prepares_only_its_alias():
     assert 'MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"' in text
-    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="9a594507e0a570733272801bf48193a060bc4f43"' in text
+    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="6aea2d5aa0e209484d1529b6fd213e7c23db6189"' in text
     assert 'h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"' in text
     assert 'h3_studio_install_motion_context_template' in text
     assert 'h3_motion_context_workflow.py' in text
