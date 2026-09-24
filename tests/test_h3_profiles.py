@@ -46,7 +46,7 @@ def test_motion_context_studio_install_is_pinned_and_prepares_only_its_alias():
     assert 'h3_motion_context_workflow.py' in text
     assert 'h3_profile_install_requirements "$motion_target"' in text
     assert text.index("  h3_studio_install_runtime_nodes\n") < text.index("  h3_studio_try_install_motion_context\n") < text.index("  h3_profile_finish\n")
-    assert "h3_motion_context_smoke.py" not in text
+    assert 'MOTION_CONTEXT_SMOKE_TOOL_URL="${MOTION_CONTEXT_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_SMOKE_TOOL_REV/scripts/h3_motion_context_smoke.py}"' in text
 
 
 def test_motion_context_failures_warn_and_leave_t8_template_path_running():

@@ -44,6 +44,8 @@ MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.js
 MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"
 MOTION_CONTEXT_WORKFLOW_TOOL_REV="9a594507e0a570733272801bf48193a060bc4f43"
 MOTION_CONTEXT_WORKFLOW_TOOL_URL="${MOTION_CONTEXT_WORKFLOW_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_WORKFLOW_TOOL_REV/scripts/h3_motion_context_workflow.py}"
+MOTION_CONTEXT_SMOKE_TOOL_REV="${MOTION_CONTEXT_SMOKE_TOOL_REV:-aaa79b6146c64ebc0b7c1b610fb147c209ac59d4}"
+MOTION_CONTEXT_SMOKE_TOOL_URL="${MOTION_CONTEXT_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_SMOKE_TOOL_REV/scripts/h3_motion_context_smoke.py}"
 H3_T8_SMOKE_TOOL_URL="${H3_T8_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py}"
 H3_T8_SMOKE_JOB_TOOL_URL="${H3_T8_SMOKE_JOB_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_smoke_job.py}"
 H3_T8_SMOKE_TOOL_DIR="${H3_T8_SMOKE_TOOL_DIR:-/opt/h3-studio-tools}"
@@ -1038,6 +1040,56 @@ print(
 PY
 }
 
+h3_studio_install_motion_context_smoke_tool() {
+  local tool_path="$H3_T8_SMOKE_TOOL_DIR/h3_motion_context_smoke.py"
+  local source_path="${SCRIPT_DIR:+$SCRIPT_DIR/h3_motion_context_smoke.py}"
+  local staged_path=""
+
+  if ! mkdir -p "$H3_T8_SMOKE_TOOL_DIR"; then
+    h3_profile_warn "Motion Context smoke tool directory is unavailable; continuing T8 setup."
+    return 0
+  fi
+  if ! staged_path="$(mktemp "$H3_T8_SMOKE_TOOL_DIR/.h3-motion-context-smoke.XXXXXX")"; then
+    h3_profile_warn "Motion Context smoke tool staging failed; continuing T8 setup."
+    return 0
+  fi
+  if [[ -n "$source_path" && -f "$source_path" ]]; then
+    if ! cp -f "$source_path" "$staged_path"; then
+      rm -f "$staged_path"
+      h3_profile_warn "Motion Context smoke tool staging failed; continuing T8 setup."
+      return 0
+    fi
+  elif ! curl -fsSL --retry 3 --connect-timeout 15 "$MOTION_CONTEXT_SMOKE_TOOL_URL" -o "$staged_path"; then
+    rm -f "$staged_path"
+    h3_profile_warn "Motion Context smoke tool download failed; continuing T8 setup."
+    return 0
+  fi
+  if ! "$COMFY_PYTHON" "$staged_path" --help >/dev/null; then
+    rm -f "$staged_path"
+    h3_profile_warn "Motion Context smoke tool validation failed; continuing T8 setup."
+    return 0
+  fi
+  if ! chmod 0755 "$staged_path" || ! mv -f "$staged_path" "$tool_path"; then
+    rm -f "$staged_path"
+    h3_profile_warn "Motion Context smoke tool installation failed; continuing T8 setup."
+    return 0
+  fi
+  h3_profile_info "Installed Motion Context GET-only preflight tool: $tool_path"
+  return 0
+}
+
+h3_studio_verify_motion_context_smoke() {
+  local tool_path="$H3_T8_SMOKE_TOOL_DIR/h3_motion_context_smoke.py"
+  if [[ ! -f "$tool_path" ]]; then
+    h3_profile_warn "Motion Context smoke tool is unavailable; continuing T8 setup."
+    return 0
+  fi
+  if ! "$COMFY_PYTHON" "$tool_path" preflight --comfy-url "http://127.0.0.1:$COMFY_PORT"; then
+    h3_profile_warn "Motion Context API preflight failed; continuing T8 setup."
+  fi
+  return 0
+}
+
 h3_studio_wait_ready() {
   local attempts=0
   while (( attempts < 60 )); do
@@ -1103,6 +1155,7 @@ main_studio() {
   h3_studio_try_install_motion_context
   h3_studio_install_t8_long_video_template
   h3_studio_install_t8_release_smoke_tool
+  h3_studio_install_motion_context_smoke_tool
   h3_studio_install_timeline_director
   h3_studio_install_timeline_model
   h3_studio_install_webui
@@ -1110,6 +1163,7 @@ main_studio() {
   # Restart ComfyUI after the Studio-only custom nodes are installed, then
   # verify the advanced Timeline Director contract before starting the WebUI.
   h3_profile_finish
+  h3_studio_verify_motion_context_smoke
   h3_studio_verify_webui_node_contract
   h3_studio_verify_t8_director
   h3_studio_verify_t8_long_video_template
