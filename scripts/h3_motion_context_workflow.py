@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 from pathlib import Path
+from uuid import UUID
 
 
 UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
@@ -15,6 +16,22 @@ DROP_TYPES = {
     "ComfyMathExpression", "ResolutionSelector", "MarkdownNote", "Note",
     "Fast Groups Bypasser (rgthree)", "LoraLoaderModelOnly", "H3SLAAttention",
 }
+
+
+def _output_slot(node, name, expected_type):
+    matches = [(index, output) for index, output in enumerate(node.get("outputs", []))
+               if output["name"] == name]
+    if len(matches) != 1 or matches[0][1]["type"] != expected_type:
+        raise ValueError(f"{node['type']} output {name} must be exactly one {expected_type} output")
+    return matches[0][0]
+
+
+def _is_uuid(value):
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
 
 
 def prepare_workflow(source):
@@ -108,8 +125,13 @@ def prepare_workflow(source):
     chain["widgets_values"] = [2]
     chain["widgets_values_named"]["segments"] = 2
 
+    sampler_audio_slot = _output_slot(sampler, "AUDIO", "AUDIO")
+    trim_audio_slot = next(i for i, inp in enumerate(trim["inputs"]) if inp["name"] == "audio")
+    if trim["inputs"][trim_audio_slot]["type"] != "AUDIO":
+        raise ValueError("Motion Context Trim audio input must be AUDIO")
     audio_link = next(link for link in links if link[1] == sampler["id"]
-                      and link[3] == trim["id"] and link[5] == "AUDIO")
+                      and link[2] == sampler_audio_slot and link[3] == trim["id"]
+                      and link[4] == trim_audio_slot and link[5] == "AUDIO")
     probe_id = max(nodes) + 1
     probe_in_id = max(link[0] for link in workflow["links"]) + 1
     probe_out_id = probe_in_id + 1
@@ -117,8 +139,7 @@ def prepare_workflow(source):
     audio_link[3], audio_link[4] = probe_id, 0
     trim_audio = next(i for i in trim["inputs"] if i["name"] == "audio")
     trim_audio["link"] = probe_out_id
-    links.append([probe_out_id, probe_id, 0, trim["id"],
-                  next(i for i, inp in enumerate(trim["inputs"]) if inp["name"] == "audio"), "AUDIO"])
+    links.append([probe_out_id, probe_id, 0, trim["id"], trim_audio_slot, "AUDIO"])
     probe = {
         "id": probe_id, "type": PROBE_TYPE, "pos": [x + width + 20, y + 200],
         "size": [300, 180], "flags": {}, "order": 0, "mode": 0,
@@ -134,35 +155,56 @@ def prepare_workflow(source):
         "widgets_values_named": {"fps": 24.0, "window_ms": 50.0, "search_ms": 40.0},
     }
     audio_link[0] = probe_in_id
-    sampler_audio = next(o for o in sampler["outputs"] if o["name"] == "AUDIO")
+    sampler_audio = sampler["outputs"][sampler_audio_slot]
     sampler_audio["links"] = [probe_in_id if value == old_audio_link else value
                               for value in sampler_audio["links"]]
     # Keep the probe's timing and previous latent aligned with Motion Context.
-    for origin_id, origin_slot, target_name, link_type in (
-        (context["id"], 1, "trim_frames", "INT"),
-        (next(n["id"] for n in nodes.values() if n["id"] in kept and n["type"] == "MiniMaxH3MotionContextLoadLatent"), 0, "clip_a_latent", "LATENT"),
-        (model_loader["id"], 3, "audio_vae", "VAE"),
+    load_latent = next(n for n in nodes.values() if n["id"] in kept
+                       and n["type"] == "MiniMaxH3MotionContextLoadLatent")
+    for origin, output_name, target_name, link_type in (
+        (context, "trim_frames", "trim_frames", "INT"),
+        (load_latent, "LATENT", "clip_a_latent", "LATENT"),
+        (model_loader, "VAE_1", "audio_vae", "VAE"),
     ):
+        origin_slot = _output_slot(origin, output_name, link_type)
         new_id = max(link[0] for link in links) + 1
         input_slot = next(i for i, inp in enumerate(probe["inputs"]) if inp["name"] == target_name)
-        links.append([new_id, origin_id, origin_slot, probe_id, input_slot, link_type])
+        if probe["inputs"][input_slot]["type"] != link_type:
+            raise ValueError(f"Seam Probe input {target_name} must be {link_type}")
+        links.append([new_id, origin["id"], origin_slot, probe_id, input_slot, link_type])
         probe["inputs"][input_slot]["link"] = new_id
-        if nodes[origin_id]["outputs"][origin_slot].get("links") is None:
-            nodes[origin_id]["outputs"][origin_slot]["links"] = []
-        nodes[origin_id]["outputs"][origin_slot]["links"].append(new_id)
+        if origin["outputs"][origin_slot].get("links") is None:
+            origin["outputs"][origin_slot]["links"] = []
+        origin["outputs"][origin_slot]["links"].append(new_id)
+    for link in links:
+        if link[1] == probe_id or link[3] == probe_id:
+            source_node = probe if link[1] == probe_id else nodes[link[1]]
+            target_node = probe if link[3] == probe_id else nodes[link[3]]
+            if (source_node["outputs"][link[2]]["type"] != link[5]
+                    or target_node["inputs"][link[4]]["type"] != link[5]):
+                raise ValueError("Seam Probe link endpoint types do not match")
     workflow["nodes"] = [node for node in workflow["nodes"] if node["id"] in kept] + [probe]
     workflow["links"] = links
     workflow["groups"] = [g for g in workflow["groups"] if g["title"] in {
         "MiniMax H3 FL2VA", "FL2VA Motion Context"}]
     definitions = workflow["definitions"]["subgraphs"]
     by_definition = {item["id"]: item for item in definitions}
-    required = {node["type"] for node in workflow["nodes"] if node["type"] in by_definition}
+    def referenced_definition(node):
+        node_type = node["type"]
+        if _is_uuid(node_type):
+            if node_type not in by_definition:
+                raise ValueError(f"Missing subgraph definition: {node_type}")
+            return node_type
+        return None
+
+    required = {ref for node in workflow["nodes"] if (ref := referenced_definition(node))}
     pending = list(required)
     while pending:
         for node in by_definition[pending.pop()]["nodes"]:
-            if node["type"] in by_definition and node["type"] not in required:
-                required.add(node["type"])
-                pending.append(node["type"])
+            ref = referenced_definition(node)
+            if ref and ref not in required:
+                required.add(ref)
+                pending.append(ref)
     workflow["definitions"]["subgraphs"] = [item for item in definitions if item["id"] in required]
     loader_definition = by_definition[model_loader["type"]]
     for node in loader_definition["nodes"]:
