@@ -27,6 +27,10 @@ NODE_TYPES = (
     "MiniMaxH3MotionContextSeamProbe",
 )
 FPS = 24
+SEGMENT_FRAMES = 124
+CONTEXT_FRAMES = 22
+SECOND_SEGMENT_FRAMES = SEGMENT_FRAMES - CONTEXT_FRAMES
+JOINED_FRAMES = SEGMENT_FRAMES + SECOND_SEGMENT_FRAMES
 DURATION_TOLERANCE_SECONDS = 0.1
 
 
@@ -280,9 +284,9 @@ def _check_smoke_workflow(workflow):
     if generators != ["MiniMaxH3ImageToVideo"]:
         raise SmokeError(f"workflow must run exactly one FL2VA/T2V node; found {generators}")
     fl2va = _exactly_one(nodes, "MiniMaxH3ImageToVideo")
-    if (fl2va.get("widgets_values_named") or {}).get("length") != 73 \
-            or not fl2va.get("widgets_values") or fl2va["widgets_values"][-1] != 73:
-        raise SmokeError("FL2VA/T2V node must be configured for exactly 73 frames")
+    if (fl2va.get("widgets_values_named") or {}).get("length") != SEGMENT_FRAMES \
+            or not fl2va.get("widgets_values") or fl2va["widgets_values"][-1] != SEGMENT_FRAMES:
+        raise SmokeError(f"FL2VA/T2V node must be configured for exactly {SEGMENT_FRAMES} frames")
     if any(kind in node_types for kind in ("LoadImage", "LoadVideo", "LoadAudio", "MiniMaxH3ReferenceToVideo")):
         raise SmokeError("smoke workflow must not require reference media or Ref2VA")
 
@@ -295,6 +299,10 @@ def _check_smoke_workflow(workflow):
     if (chain.get("widgets_values") != [2]
             or (chain.get("widgets_values_named") or {}).get("segments") != 2):
         raise SmokeError("Motion Context Chain must default to 2 segments")
+    if ((context.get("widgets_values_named") or {}).get("context_length") != str(CONTEXT_FRAMES)
+            or not context.get("widgets_values")
+            or context["widgets_values"][0] != str(CONTEXT_FRAMES)):
+        raise SmokeError(f"Motion Context must retain {CONTEXT_FRAMES} context frames")
     if ((load.get("widgets_values_named") or {}).get("clip_index") != 0
             or (save.get("widgets_values_named") or {}).get("clip_index") != 1):
         raise SmokeError("smoke workflow must begin with Load 0 / Save 1")
@@ -465,8 +473,8 @@ def join_verify(first, second, latent, output):
     if os.path.lexists(output_path):
         raise SmokeError(f"output already exists; refusing to overwrite: {output_path}")
 
-    _validate_media(first_path, 73)
-    _validate_media(second_path, 51)
+    _validate_media(first_path, SEGMENT_FRAMES)
+    _validate_media(second_path, SECOND_SEGMENT_FRAMES)
     command = [
         "ffmpeg", "-v", "error", "-xerror", "-nostdin", "-n",
         "-i", str(first_path), "-i", str(second_path),
@@ -478,12 +486,13 @@ def join_verify(first, second, latent, output):
     _run_ffmpeg(command, "join")
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise SmokeError(f"ffmpeg did not create a non-empty output: {output_path}")
-    _validate_media(output_path, 124)
+    _validate_media(output_path, JOINED_FRAMES)
 
     decode = ["ffmpeg", "-v", "error", "-xerror", "-nostdin", "-i", str(output_path),
               "-map", "0", "-f", "null", "-"]
     _run_ffmpeg(decode, "full decode")
-    print(f"Join verified: 73 + 51 = 124 frames at 24 fps, about 5.1667 seconds, with audio and video: {output_path}")
+    print(f"Join verified: {SEGMENT_FRAMES} + {SECOND_SEGMENT_FRAMES} = {JOINED_FRAMES} frames "
+          f"at {FPS} fps, about {JOINED_FRAMES / FPS:.4f} seconds, with audio and video: {output_path}")
 
 
 def _parser():

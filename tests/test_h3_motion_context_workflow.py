@@ -45,7 +45,7 @@ def test_fl2va_smoke_workflow_is_self_contained():
     assert not any(node["type"] in {"LoadImage", "LoadVideo", "LoadAudio"} for node in nodes)
 
     by_type = {node["type"]: node for node in nodes}
-    assert by_type["MiniMaxH3ImageToVideo"]["widgets_values"][-1] == 73
+    assert by_type["MiniMaxH3ImageToVideo"]["widgets_values"][-1] == 124
     assert by_type["MiniMaxH3MotionContext"]["widgets_values"] == ["22", 24]
     assert by_type["MiniMaxH3MotionContextChain"]["widgets_values"] == [2]
     assert by_type["MiniMaxH3MotionContextTrim"]["widgets_values"][1] == 24
@@ -107,7 +107,7 @@ def test_named_widgets_and_retained_loader_definition_use_installed_models():
     assert chain["widgets_values_named"]["segments"] == chain["widgets_values"][0] == 2
     image_to_video = next(node for node in result["nodes"] if node["type"] == "MiniMaxH3ImageToVideo")
     context = next(node for node in result["nodes"] if node["type"] == "MiniMaxH3MotionContext")
-    assert image_to_video["widgets_values_named"]["length"] == image_to_video["widgets_values"][-1] == 73
+    assert image_to_video["widgets_values_named"]["length"] == image_to_video["widgets_values"][-1] == 124
     assert context["widgets_values_named"]["context_length"] == context["widgets_values"][0] == "22"
     assert context["widgets_values_named"]["audio_context_length"] == context["widgets_values"][1] == 24
     loader_nodes = {node["type"]: node for node in definitions[loader["type"]]["nodes"]}

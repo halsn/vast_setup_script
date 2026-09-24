@@ -185,7 +185,8 @@ def test_preflight_reports_missing_node_template_or_workflow(case, expected_mess
 
 @pytest.mark.parametrize(
     ("mutation", "expected_message"),
-    (("wrong-frame-count", "73"),
+    (("wrong-frame-count", "124"),
+     ("wrong-context-length", "22"),
      ("missing-seam-link", "clip_a_latent"),
      ("broken-subgraph-link", "missing node endpoint"),
      ("wrong-subgraph-link-type", "type"),
@@ -200,8 +201,12 @@ def test_preflight_rejects_a_workflow_that_breaks_the_smoke_contract(mutation, e
     workflow = _workflow()
     if mutation == "wrong-frame-count":
         node = next(n for n in workflow["nodes"] if n["type"] == "MiniMaxH3ImageToVideo")
-        node["widgets_values"][-1] = 72
-        node["widgets_values_named"]["length"] = 72
+        node["widgets_values"][-1] = 123
+        node["widgets_values_named"]["length"] = 123
+    elif mutation == "wrong-context-length":
+        node = next(n for n in workflow["nodes"] if n["type"] == "MiniMaxH3MotionContext")
+        node["widgets_values"][0] = "21"
+        node["widgets_values_named"]["context_length"] = "21"
     elif mutation.startswith(("broken-subgraph", "wrong-subgraph", "invalid-subgraph")):
         subgraph = next(d for d in workflow["definitions"]["subgraphs"]
                         if d["name"] == "Sampling/Decoding/Create")
@@ -292,10 +297,10 @@ class FakeMediaTools:
     def __init__(self, paths, *, first=None, second=None, output=None, decode_status=0):
         self.paths = paths
         self.reports = {
-            str(paths["first"].resolve()): first or _media_report(frames=73),
-            str(paths["second"].resolve()): second or _media_report(frames=51),
+            str(paths["first"].resolve()): first or _media_report(frames=124),
+            str(paths["second"].resolve()): second or _media_report(frames=102),
         }
-        self.output_report = output or _media_report(frames=124)
+        self.output_report = output or _media_report(frames=226)
         self.decode_status = decode_status
         self.calls = []
 
@@ -372,10 +377,10 @@ def test_join_verifies_inputs_output_and_full_decode_without_shell(tmp_path, mon
 
 @pytest.mark.parametrize(
     ("which", "report", "message"),
-    (("first", _media_report(frames=72), "73"),
-     ("second", _media_report(frames=50), "51"),
-     ("first", _media_report(frames=73, fps="25/1"), "24"),
-     ("second", _media_report(frames=51, duration=2.5), "duration")),
+    (("first", _media_report(frames=123), "124"),
+     ("second", _media_report(frames=101), "102"),
+     ("first", _media_report(frames=124, fps="25/1"), "24"),
+     ("second", _media_report(frames=102, duration=4.0), "duration")),
 )
 def test_join_rejects_invalid_input_frames_fps_or_duration(tmp_path, monkeypatch, capsys,
                                                            which, report, message):
@@ -388,11 +393,11 @@ def test_join_rejects_invalid_input_frames_fps_or_duration(tmp_path, monkeypatch
 
 @pytest.mark.parametrize(
     ("report", "message"),
-    ((_media_report(frames=123), "124"),
-     (_media_report(frames=124, fps="30/1"), "24"),
-     (_media_report(frames=124, duration=5.5), "duration"),
-     (_media_report(frames=124, audio=False), "audio"),
-     (_media_report(frames=124, video=False), "video")),
+    ((_media_report(frames=225), "226"),
+     (_media_report(frames=226, fps="30/1"), "24"),
+     (_media_report(frames=226, duration=8.8), "duration"),
+     (_media_report(frames=226, audio=False), "audio"),
+     (_media_report(frames=226, video=False), "video")),
 )
 def test_join_rejects_invalid_output_metadata(tmp_path, monkeypatch, capsys, report, message):
     tool, _fake, _paths, argv = _join_case(tmp_path, monkeypatch, output=report)
@@ -401,8 +406,8 @@ def test_join_rejects_invalid_output_metadata(tmp_path, monkeypatch, capsys, rep
 
 
 def test_join_rejects_output_audio_with_wrong_duration(tmp_path, monkeypatch, capsys):
-    report = _media_report(frames=124)
-    report["streams"][1]["duration"] = "4.0"
+    report = _media_report(frames=226)
+    report["streams"][1]["duration"] = "8.0"
     tool, _fake, _paths, argv = _join_case(tmp_path, monkeypatch, output=report)
     assert tool.main(argv) != 0
     assert "duration" in capsys.readouterr().err.lower()
@@ -410,7 +415,7 @@ def test_join_rejects_output_audio_with_wrong_duration(tmp_path, monkeypatch, ca
 
 @pytest.mark.parametrize("missing_stream", ("audio", "video"))
 def test_join_rejects_inputs_without_audio_or_video(tmp_path, monkeypatch, capsys, missing_stream):
-    report = _media_report(frames=73 if missing_stream == "audio" else 73,
+    report = _media_report(frames=124,
                            audio=missing_stream != "audio", video=missing_stream != "video")
     tool, _fake, _paths, argv = _join_case(tmp_path, monkeypatch, first=report)
     assert tool.main(argv) != 0

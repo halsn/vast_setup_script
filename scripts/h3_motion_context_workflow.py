@@ -110,8 +110,8 @@ def prepare_workflow(source):
     model_loader["widgets_values_named"]["unet_name"] = UNET
     model_loader["widgets_values_named"]["clip_name"] = CLIP
     image_to_video = nodes[roots[0]]
-    image_to_video["widgets_values"][-1] = 73
-    image_to_video["widgets_values_named"]["length"] = 73
+    image_to_video["widgets_values"][-1] = 124
+    image_to_video["widgets_values_named"]["length"] = 124
     context = next(node for node in nodes.values() if node["id"] in kept
                    and node["type"] == "MiniMaxH3MotionContext")
     context["widgets_values"] = ["22", 24]
