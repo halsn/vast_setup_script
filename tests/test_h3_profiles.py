@@ -40,13 +40,46 @@ def test_motion_context_studio_install_is_pinned_and_prepares_only_its_alias():
     assert 'MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"' in text
-    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="79a59f2f3a49acc332269e3f6498156cf9d21ac3"' in text
+    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="e2c7049212dcfd0673e39d35ba19aaa203b13e6e"' in text
     assert 'h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"' in text
     assert 'h3_studio_install_motion_context_template' in text
     assert 'h3_motion_context_workflow.py' in text
     assert 'h3_profile_install_requirements "$motion_target"' in text
-    assert text.index("  h3_studio_install_runtime_nodes\n") < text.index("  h3_studio_install_motion_context_template\n") < text.index("  h3_profile_finish\n")
+    assert text.index("  h3_studio_install_runtime_nodes\n") < text.index("  h3_studio_try_install_motion_context\n") < text.index("  h3_profile_finish\n")
     assert "h3_motion_context_smoke.py" not in text
+
+
+def test_motion_context_failures_warn_and_leave_t8_template_path_running():
+    text = (ROOT / STUDIO_SCRIPT).read_text()
+    runtime = text.split("h3_studio_install_runtime_nodes() {", 1)[1].split("\n}\n", 1)[0]
+    assert "MOTION_CONTEXT_NODE_NAME" not in runtime
+    checkout = text.split("h3_studio_install_pinned_checkout() {", 1)[1].split("\n}\n", 1)[0]
+    assert 'git clone --filter=blob:none "$repo" "$target" || return 1' in checkout
+    assert 'git -C "$target" fetch --force --depth=1 origin "$revision" || return 1' in checkout
+    assert 'git -C "$target" checkout --detach --force "$revision" || return 1' in checkout
+    assert text.index("  h3_studio_install_runtime_nodes\n") < text.index("  h3_studio_try_install_motion_context\n") < text.index("  h3_studio_install_t8_long_video_template\n")
+    function = "h3_studio_try_install_motion_context() {" + text.split(
+        "h3_studio_try_install_motion_context() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+    for failing_step in ("checkout", "requirements", "template"):
+        harness = f"""set -Eeuo pipefail
+FAIL_AT={failing_step}
+COMFY_DIR=/tmp/comfy
+MOTION_CONTEXT_NODE_NAME=ComfyUI-H3-Motion-Context
+MOTION_CONTEXT_NODE_REPO=unused
+MOTION_CONTEXT_NODE_REV=unused
+h3_profile_warn() {{ printf '[WARN] %s\\n' "$*" >&2; }}
+h3_studio_install_pinned_checkout() {{ [[ "$FAIL_AT" != checkout ]]; }}
+h3_profile_install_requirements() {{ [[ "$FAIL_AT" != requirements ]]; }}
+h3_studio_install_motion_context_template() {{ [[ "$FAIL_AT" != template ]]; }}
+h3_studio_install_t8_long_video_template() {{ printf 'T8_READY\\n'; }}
+{function}
+h3_studio_try_install_motion_context
+h3_studio_install_t8_long_video_template
+"""
+        run = subprocess.run([BASH, "-c", harness], capture_output=True, text=True)
+        assert run.returncode == 0, run.stderr
+        assert "T8_READY" in run.stdout
+        assert "[WARN]" in run.stderr and "Motion Context" in run.stderr
 
 
 def test_h3_profile_scripts_are_flat_and_parse():

@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import sys
+from uuid import UUID
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,3 +86,70 @@ def test_fl2va_smoke_workflow_is_self_contained():
     model = by_type[next(t for t in types if t.count("-") == 4)]
     assert any(link[1] == model["id"] and link[3] == sampler["id"]
                and sampler["inputs"][link[4]]["name"] == "model" for link in links)
+
+
+def test_named_widgets_and_retained_loader_definition_use_installed_models():
+    module_path = ROOT / "scripts/h3_motion_context_workflow.py"
+    spec = importlib.util.spec_from_file_location("h3_motion_context_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result = module.prepare_workflow(json.loads(SOURCE.read_text(encoding="utf-8")))
+    definitions = {item["id"]: item for item in result["definitions"]["subgraphs"]}
+    loader = next(node for node in result["nodes"] if node["type"] in definitions
+                  and any(output["name"] == "MODEL" for output in node.get("outputs", [])))
+    chain = next(node for node in result["nodes"] if node["type"] == "MiniMaxH3MotionContextChain")
+    assert loader["widgets_values"][:2] == [
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    ]
+    assert loader["widgets_values_named"]["unet_name"] == loader["widgets_values"][0]
+    assert loader["widgets_values_named"]["clip_name"] == loader["widgets_values"][1]
+    assert chain["widgets_values_named"]["segments"] == chain["widgets_values"][0] == 2
+    image_to_video = next(node for node in result["nodes"] if node["type"] == "MiniMaxH3ImageToVideo")
+    context = next(node for node in result["nodes"] if node["type"] == "MiniMaxH3MotionContext")
+    assert image_to_video["widgets_values_named"]["length"] == image_to_video["widgets_values"][-1] == 73
+    assert context["widgets_values_named"]["context_length"] == context["widgets_values"][0] == "22"
+    assert context["widgets_values_named"]["audio_context_length"] == context["widgets_values"][1] == 24
+    loader_nodes = {node["type"]: node for node in definitions[loader["type"]]["nodes"]}
+    for node_type, key, expected in (
+        ("UNETLoader", "unet_name", loader["widgets_values"][0]),
+        ("CLIPLoader", "clip_name", loader["widgets_values"][1]),
+    ):
+        assert loader_nodes[node_type]["widgets_values_named"][key] == expected
+        assert loader_nodes[node_type]["widgets_values"][0] == expected
+
+
+def test_only_referenced_fl2va_subgraphs_remain():
+    module_path = ROOT / "scripts/h3_motion_context_workflow.py"
+    spec = importlib.util.spec_from_file_location("h3_motion_context_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result = module.prepare_workflow(json.loads(SOURCE.read_text(encoding="utf-8")))
+    definitions = {item["id"]: item for item in result["definitions"]["subgraphs"]}
+    for node in [*result["nodes"], *(node for item in definitions.values() for node in item["nodes"])]:
+        try:
+            UUID(node["type"])
+        except ValueError:
+            continue
+        assert node["type"] in definitions
+    referenced = {node["type"] for node in result["nodes"] if node["type"] in definitions}
+    for item in definitions.values():
+        referenced.update(node["type"] for node in item["nodes"] if node["type"] in definitions)
+    assert referenced == set(definitions)
+    assert len(definitions) == 2
+    assert "ref2va_pruned" not in json.dumps(result).lower()
+
+
+def test_nested_fl2va_definition_dependency_is_retained():
+    module_path = ROOT / "scripts/h3_motion_context_workflow.py"
+    spec = importlib.util.spec_from_file_location("h3_motion_context_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source = json.loads(SOURCE.read_text(encoding="utf-8"))
+    sampler_definition = next(item for item in source["definitions"]["subgraphs"]
+                              if item["id"] == "042a0b44-1cf9-4a0e-9cfb-a0773ec19e26")
+    nested_id = "118aa526-b069-47c3-993b-4fb21558740b"
+    sampler_definition["nodes"].append({"id": 9999, "type": nested_id})
+    source["definitions"]["subgraphs"].append({"id": nested_id, "nodes": []})
+    result = module.prepare_workflow(source)
+    assert nested_id in {item["id"] for item in result["definitions"]["subgraphs"]}

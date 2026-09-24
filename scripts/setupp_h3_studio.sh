@@ -42,7 +42,7 @@ MOTION_CONTEXT_NODE_REPO="https://github.com/NikoDemon80/ComfyUI-H3-Motion-Conte
 MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"
 MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"
 MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"
-MOTION_CONTEXT_WORKFLOW_TOOL_REV="79a59f2f3a49acc332269e3f6498156cf9d21ac3"
+MOTION_CONTEXT_WORKFLOW_TOOL_REV="e2c7049212dcfd0673e39d35ba19aaa203b13e6e"
 MOTION_CONTEXT_WORKFLOW_TOOL_URL="${MOTION_CONTEXT_WORKFLOW_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_WORKFLOW_TOOL_REV/scripts/h3_motion_context_workflow.py}"
 H3_T8_SMOKE_TOOL_URL="${H3_T8_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py}"
 H3_T8_SMOKE_JOB_TOOL_URL="${H3_T8_SMOKE_JOB_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_smoke_job.py}"
@@ -87,10 +87,10 @@ h3_studio_install_pinned_checkout() {
     return 1
   fi
   if [[ ! -d "$target/.git" ]]; then
-    git clone --filter=blob:none "$repo" "$target"
+    git clone --filter=blob:none "$repo" "$target" || return 1
   fi
-  git -C "$target" fetch --force --depth=1 origin "$revision"
-  git -C "$target" checkout --detach --force "$revision"
+  git -C "$target" fetch --force --depth=1 origin "$revision" || return 1
+  git -C "$target" checkout --detach --force "$revision" || return 1
   actual_rev="$(git -C "$target" rev-parse HEAD)"
   [[ "$actual_rev" == "$revision" ]] \
     || { h3_profile_error "$name revision mismatch: $actual_rev"; return 1; }
@@ -99,7 +99,6 @@ h3_studio_install_pinned_checkout() {
 h3_studio_install_runtime_nodes() {
   local kj_target="$COMFY_DIR/custom_nodes/$KJ_NODE_NAME"
   local t8_target="$COMFY_DIR/custom_nodes/$T8_NODE_NAME"
-  local motion_target="$COMFY_DIR/custom_nodes/$MOTION_CONTEXT_NODE_NAME"
   mkdir -p "$COMFY_DIR/custom_nodes"
 
   # The Studio enables MiniMaxChunkFeedForward/MiniMaxLowVRAMAttention by
@@ -109,8 +108,6 @@ h3_studio_install_runtime_nodes() {
 
   h3_studio_install_pinned_checkout "$T8_NODE_NAME" "$T8_NODE_REPO" "$T8_NODE_REV" "$t8_target"
   h3_profile_install_requirements "$t8_target"
-  h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"
-  h3_profile_install_requirements "$motion_target"
   h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
 }
 
@@ -124,14 +121,36 @@ h3_studio_install_motion_context_template() {
     return 1
   }
   if [[ ! -f "$workflow_tool" ]]; then
-    workflow_tool="$(mktemp)"
-    curl -fsSL --retry 3 --connect-timeout 15 "$MOTION_CONTEXT_WORKFLOW_TOOL_URL" -o "$workflow_tool"
+    workflow_tool="$(mktemp)" || return 1
+    if ! curl -fsSL --retry 3 --connect-timeout 15 "$MOTION_CONTEXT_WORKFLOW_TOOL_URL" -o "$workflow_tool"; then
+      rm -f "$workflow_tool"
+      return 1
+    fi
   fi
-  "$COMFY_PYTHON" "$workflow_tool" "$source_template" "$alias_template"
+  if ! "$COMFY_PYTHON" "$workflow_tool" "$source_template" "$alias_template"; then
+    [[ "$workflow_tool" == "$SCRIPT_DIR/h3_motion_context_workflow.py" ]] || rm -f "$workflow_tool"
+    return 1
+  fi
   if [[ "$workflow_tool" != "$SCRIPT_DIR/h3_motion_context_workflow.py" ]]; then
     rm -f "$workflow_tool"
   fi
   h3_profile_info "Motion Context FL2VA template installed: $MOTION_CONTEXT_TEMPLATE_ALIAS."
+}
+
+h3_studio_try_install_motion_context() {
+  local motion_target="$COMFY_DIR/custom_nodes/$MOTION_CONTEXT_NODE_NAME"
+  if ! h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"; then
+    h3_profile_warn "Motion Context checkout failed; continuing T8 setup."
+    return 0
+  fi
+  if ! h3_profile_install_requirements "$motion_target"; then
+    h3_profile_warn "Motion Context requirements failed; continuing T8 setup."
+    return 0
+  fi
+  if ! h3_studio_install_motion_context_template; then
+    h3_profile_warn "Motion Context template preparation failed; continuing T8 setup."
+    return 0
+  fi
 }
 
 h3_studio_install_t8_long_video_template() {
@@ -1081,7 +1100,7 @@ main_studio() {
   h3_studio_configure_timeline_model
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
-  h3_studio_install_motion_context_template
+  h3_studio_try_install_motion_context
   h3_studio_install_t8_long_video_template
   h3_studio_install_t8_release_smoke_tool
   h3_studio_install_timeline_director
