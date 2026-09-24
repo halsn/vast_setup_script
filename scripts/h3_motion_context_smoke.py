@@ -72,6 +72,93 @@ def _named(items, name, owner):
     return matches[0]
 
 
+def _validate_subgraph_links(definition):
+    name = definition.get("name", definition.get("id"))
+    nodes = definition.get("nodes")
+    links = definition.get("links")
+    inputs = definition.get("inputs")
+    outputs = definition.get("outputs")
+    input_node = definition.get("inputNode")
+    output_node = definition.get("outputNode")
+    if not all(isinstance(value, list) for value in (nodes, links, inputs, outputs)):
+        raise SmokeError(f"subgraph {name} has malformed nodes, links, or boundary slots")
+    if not isinstance(input_node, dict) or not isinstance(output_node, dict):
+        raise SmokeError(f"subgraph {name} has missing boundary node IDs")
+
+    input_id = input_node.get("id")
+    output_id = output_node.get("id")
+    by_id = {node.get("id"): node for node in nodes if isinstance(node, dict)}
+    if len(by_id) != len(nodes) or None in by_id:
+        raise SmokeError(f"subgraph {name} has missing or duplicate node IDs")
+    if input_id == output_id or input_id in by_id or output_id in by_id:
+        raise SmokeError(f"subgraph {name} has conflicting boundary node IDs")
+
+    link_by_id = {}
+    for link in links:
+        if not isinstance(link, dict):
+            raise SmokeError(f"subgraph {name} contains a malformed link")
+        link_id = link.get("id")
+        source_id = link.get("origin_id")
+        source_slot = link.get("origin_slot")
+        target_id = link.get("target_id")
+        target_slot = link.get("target_slot")
+        link_type = link.get("type")
+        if link_id in link_by_id:
+            raise SmokeError(f"subgraph {name} has duplicate link ID {link_id}")
+        if source_id == output_id or target_id == input_id:
+            raise SmokeError(f"subgraph {name} link {link_id} reverses a boundary node")
+
+        source_boundary = source_id == input_id
+        target_boundary = target_id == output_id
+        source = None if source_boundary else by_id.get(source_id)
+        target = None if target_boundary else by_id.get(target_id)
+        if not source_boundary and source is None or not target_boundary and target is None:
+            raise SmokeError(f"subgraph {name} link {link_id} has a missing node endpoint")
+        source_slots = inputs if source_boundary else (source.get("outputs") or [])
+        target_slots = outputs if target_boundary else (target.get("inputs") or [])
+        if not isinstance(source_slot, int) or not 0 <= source_slot < len(source_slots):
+            raise SmokeError(f"subgraph {name} link {link_id} has an invalid output slot")
+        if not isinstance(target_slot, int) or not 0 <= target_slot < len(target_slots):
+            raise SmokeError(f"subgraph {name} link {link_id} has an invalid input slot")
+        source_port = source_slots[source_slot]
+        target_port = target_slots[target_slot]
+        if (source_port.get("type") != link_type
+                or target_port.get("type") not in (link_type, "COMBO")):
+            raise SmokeError(f"subgraph {name} link {link_id} has incompatible slot types")
+        source_links = source_port.get("linkIds") if source_boundary else source_port.get("links")
+        if link_id not in (source_links or []):
+            raise SmokeError(f"subgraph {name} output does not list link {link_id}")
+        target_link = target_port.get("linkIds") if target_boundary else target_port.get("link")
+        target_has_link = link_id in (target_link or []) if target_boundary else target_link == link_id
+        if not target_has_link:
+            raise SmokeError(f"subgraph {name} input does not list link {link_id}")
+        link_by_id[link_id] = link
+
+    for node in nodes:
+        for index, slot in enumerate(node.get("inputs") or []):
+            link_id = slot.get("link")
+            if link_id is not None:
+                link = link_by_id.get(link_id)
+                if link is None or link.get("target_id") != node["id"] or link.get("target_slot") != index:
+                    raise SmokeError(f"subgraph {name} input link is inconsistent: {node.get('type')}.{slot.get('name')}")
+        for index, slot in enumerate(node.get("outputs") or []):
+            for link_id in slot.get("links") or []:
+                link = link_by_id.get(link_id)
+                if link is None or link.get("origin_id") != node["id"] or link.get("origin_slot") != index:
+                    raise SmokeError(f"subgraph {name} output link is inconsistent: {node.get('type')}.{slot.get('name')}")
+
+    for index, slot in enumerate(inputs):
+        for link_id in slot.get("linkIds") or []:
+            link = link_by_id.get(link_id)
+            if link is None or link.get("origin_id") != input_id or link.get("origin_slot") != index:
+                raise SmokeError(f"subgraph {name} input boundary link is inconsistent: {slot.get('name')}")
+    for index, slot in enumerate(outputs):
+        for link_id in slot.get("linkIds") or []:
+            link = link_by_id.get(link_id)
+            if link is None or link.get("target_id") != output_id or link.get("target_slot") != index:
+                raise SmokeError(f"subgraph {name} output boundary link is inconsistent: {slot.get('name')}")
+
+
 def _validate_graph(workflow):
     nodes = workflow.get("nodes")
     links = workflow.get("links")
@@ -125,6 +212,8 @@ def _validate_graph(workflow):
     definition_by_id = {item.get("id"): item for item in definitions if isinstance(item, dict)}
     if len(definition_by_id) != len(definitions) or None in definition_by_id:
         raise SmokeError("workflow subgraph definitions have missing or duplicate IDs")
+    for definition in definition_by_id.values():
+        _validate_subgraph_links(definition)
     for node in nodes:
         try:
             reference = UUID(str(node.get("type")))
