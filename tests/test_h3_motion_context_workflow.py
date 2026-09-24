@@ -153,3 +153,102 @@ def test_nested_fl2va_definition_dependency_is_retained():
     source["definitions"]["subgraphs"].append({"id": nested_id, "nodes": []})
     result = module.prepare_workflow(source)
     assert nested_id in {item["id"] for item in result["definitions"]["subgraphs"]}
+
+
+def test_missing_sampler_definition_fails_before_cli_writes_destination(tmp_path):
+    module_path = ROOT / "scripts/h3_motion_context_workflow.py"
+    spec = importlib.util.spec_from_file_location("h3_motion_context_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source = json.loads(SOURCE.read_text(encoding="utf-8"))
+    missing_id = "042a0b44-1cf9-4a0e-9cfb-a0773ec19e26"
+    source["definitions"]["subgraphs"] = [
+        item for item in source["definitions"]["subgraphs"] if item["id"] != missing_id
+    ]
+    try:
+        module.prepare_workflow(source)
+    except ValueError as exc:
+        assert missing_id in str(exc)
+    else:
+        assert False, "Missing sampler definition must fail closed"
+
+    invalid_source = tmp_path / "invalid.json"
+    invalid_source.write_text(json.dumps(source), encoding="utf-8")
+    for exists in (False, True):
+        destination = tmp_path / f"alias-{exists}.json"
+        if exists:
+            destination.write_text("existing template", encoding="utf-8")
+        run = subprocess.run([sys.executable, str(module_path), str(invalid_source), str(destination)],
+                             capture_output=True, text=True)
+        assert run.returncode != 0
+        assert missing_id in run.stderr
+        if exists:
+            assert destination.read_text(encoding="utf-8") == "existing template"
+        else:
+            assert not destination.exists()
+
+
+def test_probe_links_follow_reordered_output_roles_and_types():
+    module_path = ROOT / "scripts/h3_motion_context_workflow.py"
+    spec = importlib.util.spec_from_file_location("h3_motion_context_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source = json.loads(SOURCE.read_text(encoding="utf-8"))
+    context = next(node for node in source["nodes"] if node["type"] == "MiniMaxH3MotionContext"
+                   and node["pos"][1] > 5500)
+    context["outputs"].reverse()
+    for link in source["links"]:
+        if link[1] == context["id"]:
+            link[2] = 1 - link[2]
+    loader = next(node for node in source["nodes"] if node["type"] == "ad044397-cdc4-4c25-820c-cfb3a9f00383")
+    loader["outputs"].reverse()
+    for link in source["links"]:
+        if link[1] == loader["id"]:
+            link[2] = len(loader["outputs"]) - 1 - link[2]
+    result = module.prepare_workflow(source)
+    nodes = {node["id"]: node for node in result["nodes"]}
+    probe = next(node for node in nodes.values() if node["type"] == "MiniMaxH3MotionContextSeamProbe")
+    edges = [link for link in result["links"] if link[1] == probe["id"] or link[3] == probe["id"]]
+    assert len(edges) == 5
+    for link in edges:
+        output = nodes[link[1]]["outputs"][link[2]]
+        target = nodes[link[3]]["inputs"][link[4]]
+        assert output["type"] == target["type"] == link[5]
+    trim_edge = next(link for link in edges if link[1] == context["id"]
+                     and probe["inputs"][link[4]]["name"] == "trim_frames")
+    assert context["outputs"][trim_edge[2]]["name"] == "trim_frames"
+
+
+def test_probe_rejects_wrong_declared_output_type():
+    module_path = ROOT / "scripts/h3_motion_context_workflow.py"
+    spec = importlib.util.spec_from_file_location("h3_motion_context_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source = json.loads(SOURCE.read_text(encoding="utf-8"))
+    context = next(node for node in source["nodes"] if node["type"] == "MiniMaxH3MotionContext"
+                   and node["pos"][1] > 5500)
+    next(output for output in context["outputs"] if output["name"] == "trim_frames")["type"] = "CONDITIONING"
+    try:
+        module.prepare_workflow(source)
+    except ValueError as exc:
+        assert "trim_frames" in str(exc) and "INT" in str(exc)
+    else:
+        assert False, "Mismatched Seam Probe output must fail closed"
+
+
+def test_missing_transitive_subgraph_definition_fails_closed():
+    module_path = ROOT / "scripts/h3_motion_context_workflow.py"
+    spec = importlib.util.spec_from_file_location("h3_motion_context_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source = json.loads(SOURCE.read_text(encoding="utf-8"))
+    sampler_definition = next(item for item in source["definitions"]["subgraphs"]
+                              if item["id"] == "042a0b44-1cf9-4a0e-9cfb-a0773ec19e26")
+    missing_id = "118aa526-b069-47c3-993b-4fb21558740b"
+    sampler_definition["nodes"].append({"id": 9999, "type": missing_id})
+    try:
+        module.prepare_workflow(source)
+    except ValueError as exc:
+        assert missing_id in str(exc)
+    else:
+        assert False, "Missing nested definition must fail closed"

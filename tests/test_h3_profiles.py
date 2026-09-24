@@ -40,7 +40,7 @@ def test_motion_context_studio_install_is_pinned_and_prepares_only_its_alias():
     assert 'MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"' in text
-    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="e2c7049212dcfd0673e39d35ba19aaa203b13e6e"' in text
+    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="9a594507e0a570733272801bf48193a060bc4f43"' in text
     assert 'h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"' in text
     assert 'h3_studio_install_motion_context_template' in text
     assert 'h3_motion_context_workflow.py' in text
@@ -80,6 +80,35 @@ h3_studio_install_t8_long_video_template
         assert run.returncode == 0, run.stderr
         assert "T8_READY" in run.stdout
         assert "[WARN]" in run.stderr and "Motion Context" in run.stderr
+
+
+def test_pinned_checkout_propagates_each_git_failure_without_network():
+    text = (ROOT / STUDIO_SCRIPT).read_text()
+    function = "h3_studio_install_pinned_checkout() {" + text.split(
+        "h3_studio_install_pinned_checkout() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+    for failing_step in ("clone", "fetch", "checkout"):
+        harness = f"""set -Eeuo pipefail
+FAIL_AT={failing_step}
+target=__h3_checkout_test_never_created__
+revision=1234567890123456789012345678901234567890
+[[ ! -e "$target" ]] || exit 99
+h3_profile_error() {{ printf '[ERROR] %s\\n' "$*" >&2; return 1; }}
+git() {{
+  if [[ "$1" == clone ]]; then [[ "$FAIL_AT" != clone ]]; return; fi
+  if [[ "$3" == fetch ]]; then [[ "$FAIL_AT" != fetch ]]; return; fi
+  if [[ "$3" == checkout ]]; then [[ "$FAIL_AT" != checkout ]]; return; fi
+  if [[ "$3" == rev-parse ]]; then printf '%s\\n' "$revision"; return 0; fi
+  return 98
+}}
+{function}
+if h3_studio_install_pinned_checkout Test unused "$revision" "$target"; then
+  exit 97
+fi
+printf 'EXPECTED_FAILURE\\n'
+"""
+        run = subprocess.run([BASH, "-c", harness], capture_output=True, text=True, cwd=ROOT)
+        assert run.returncode == 0, (failing_step, run.stderr)
+        assert "EXPECTED_FAILURE" in run.stdout
 
 
 def test_h3_profile_scripts_are_flat_and_parse():
