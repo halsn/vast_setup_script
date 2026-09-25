@@ -21,6 +21,7 @@ MPI_NODE_REPO="https://github.com/MadPonyInteractive/ComfyUi-MpiNodes.git"
 MPI_NODE_REV="1de35a33827b125fe2adbc08df23266c465c032a"
 REFINE_MODEL_REPO="LBH-123-AI/Minimax_h3_latent_Upscaler"
 REFINE_MODEL_NAME="minimax_h3_latent_upscaler_3d_fp16.safetensors"
+REFINE_MODEL_SOURCE="minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors"
 REFINE_MODEL_SHA256="043e5a48e161610ef6c3ea974645220354d06fa618abca15f76d084812eb55c2"
 
 h3_profile_info() { printf '[INFO] %s\n' "$*" >&2; }
@@ -219,7 +220,7 @@ h3_profile_install_refine_model() {
     return 0
   fi
 
-  h3_profile_hf_file "$REFINE_MODEL_REPO" "$REFINE_MODEL_NAME" "$model_dir"
+  h3_profile_hf_file "$REFINE_MODEL_REPO" "$REFINE_MODEL_SOURCE" "$model_dir" "$REFINE_MODEL_NAME"
   if ! h3_profile_verify_refine_model "$model_path"; then
     h3_profile_error "Downloaded H3 Refine checkpoint failed SHA-256 verification."
     return 1
@@ -349,15 +350,15 @@ PY
 }
 
 h3_profile_hf_file() {
-  local repo="$1" filename="$2" target_dir="$3"
+  local repo="$1" filename="$2" target_dir="$3" destination_name="${4:-${2##*/}}"
   mkdir -p "$target_dir"
   h3_profile_ensure_hf
-  "$COMFY_PYTHON" - "$repo" "$filename" "$target_dir" <<'PY'
+  "$COMFY_PYTHON" - "$repo" "$filename" "$target_dir" "$destination_name" <<'PY'
 import os, shutil, sys
 from huggingface_hub import hf_hub_download
-repo, filename, target_dir = sys.argv[1:]
+repo, filename, target_dir, destination_name = sys.argv[1:]
 os.makedirs(target_dir, exist_ok=True)
-dst = os.path.join(target_dir, os.path.basename(filename))
+dst = os.path.join(target_dir, destination_name)
 if os.path.isfile(dst) and os.path.getsize(dst) > 0:
     print(f"[OK] already present: {dst}")
     raise SystemExit(0)
