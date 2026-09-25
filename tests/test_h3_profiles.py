@@ -33,6 +33,14 @@ def _bash_executable():
 BASH = _bash_executable()
 
 
+def _studio_bootstrap_preamble(text):
+    preamble = text[: text.index("\ncleanup_studio_profile() {")]
+    return preamble.replace(
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"',
+        'SCRIPT_DIR="$(pwd)"',
+    )
+
+
 def test_motion_context_studio_install_is_pinned_and_prepares_only_its_alias():
     text = (ROOT / STUDIO_SCRIPT).read_text()
     assert 'MOTION_CONTEXT_NODE_NAME="ComfyUI-H3-Motion-Context"' in text
@@ -40,7 +48,7 @@ def test_motion_context_studio_install_is_pinned_and_prepares_only_its_alias():
     assert 'MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"' in text
     assert 'MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"' in text
-    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="6aea2d5aa0e209484d1529b6fd213e7c23db6189"' in text
+    assert 'MOTION_CONTEXT_WORKFLOW_TOOL_REV="${MOTION_CONTEXT_WORKFLOW_TOOL_REV:-$H3_SETUP_SUPPORT_REV}"' in text
     assert 'h3_studio_install_pinned_checkout "$MOTION_CONTEXT_NODE_NAME" "$MOTION_CONTEXT_NODE_REPO" "$MOTION_CONTEXT_NODE_REV" "$motion_target"' in text
     assert 'h3_studio_install_motion_context_template' in text
     assert 'h3_motion_context_workflow.py' in text
@@ -177,8 +185,8 @@ def test_t8_blockcache_is_installed_only_by_native_profile():
 
 
 def test_studio_bootstrap_fetches_refine_fixed_support_revision():
-    text = (ROOT / STUDIO_SCRIPT).read_text()
-    bootstrap = text[: text.index("\nH3_STUDIO_REPO=")]
+    text = (ROOT / STUDIO_SCRIPT).read_text(encoding="utf-8")
+    bootstrap = _studio_bootstrap_preamble(text)
     harness = bootstrap + '\nprintf "%s\\n" "$H3_PROFILE_COMMON_URL" "$H3_PROFILE_BASE_URL"\n'
     env = os.environ.copy()
     for name in ("H3_SETUP_SUPPORT_REV", "H3_PROFILE_COMMON_URL", "H3_PROFILE_BASE_URL"):
@@ -197,6 +205,44 @@ def test_studio_bootstrap_fetches_refine_fixed_support_revision():
     assert run.stdout.splitlines() == [
         f"https://raw.githubusercontent.com/halsn/vast_setup_script/{expected_revision}/scripts/h3_profile_common.sh",
         f"https://raw.githubusercontent.com/halsn/vast_setup_script/{expected_revision}/scripts/h3_comfui_base.sh",
+    ]
+
+
+def test_studio_bootstrap_uses_one_injected_revision_for_all_setup_repo_helpers():
+    text = (ROOT / STUDIO_SCRIPT).read_text(encoding="utf-8")
+    bootstrap = _studio_bootstrap_preamble(text)
+    harness = bootstrap + '\nprintf \'%s\\n\' "$H3_PROFILE_COMMON_URL" "$H3_PROFILE_BASE_URL" "$MOTION_CONTEXT_WORKFLOW_TOOL_URL" "$MOTION_CONTEXT_SMOKE_TOOL_URL" "$H3_T8_SMOKE_TOOL_URL" "$H3_T8_SMOKE_JOB_TOOL_URL"\n'
+    revision = "c" * 40
+    env = os.environ.copy()
+    for name in (
+        "H3_PROFILE_COMMON_URL",
+        "H3_PROFILE_BASE_URL",
+        "MOTION_CONTEXT_WORKFLOW_TOOL_REV",
+        "MOTION_CONTEXT_WORKFLOW_TOOL_URL",
+        "MOTION_CONTEXT_SMOKE_TOOL_REV",
+        "MOTION_CONTEXT_SMOKE_TOOL_URL",
+        "H3_T8_SMOKE_TOOL_URL",
+        "H3_T8_SMOKE_JOB_TOOL_URL",
+    ):
+        env.pop(name, None)
+    env["H3_SETUP_SUPPORT_REV"] = revision
+
+    run = subprocess.run(
+        [BASH, "-c", harness],
+        cwd=ROOT / "scripts",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.splitlines() == [
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{revision}/scripts/h3_profile_common.sh",
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{revision}/scripts/h3_comfui_base.sh",
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{revision}/scripts/h3_motion_context_workflow.py",
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{revision}/scripts/h3_motion_context_smoke.py",
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{revision}/scripts/h3_t8_long_video_smoke.py",
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{revision}/scripts/h3_t8_smoke_job.py",
     ]
 
 

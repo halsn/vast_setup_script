@@ -2,9 +2,8 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"
-# The Workbench may intentionally fetch this entry script from a moving branch.
-# Pin every companion script it downloads so the recorded entry-script digest
-# still identifies a deterministic deployment dependency set.
+# The Workbench supplies its resolved commit so setup-owned companion scripts
+# use the same snapshot as this entry script. Keep a tested pin for standalone runs.
 H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9734d4b0d34ce350dc9c5b90dee6c1910a9e35f2}"
 H3_PROFILE_COMMON_URL="${H3_PROFILE_COMMON_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh}"
 H3_PROFILE_BASE_URL="${H3_PROFILE_BASE_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh}"
@@ -42,9 +41,9 @@ MOTION_CONTEXT_NODE_REPO="https://github.com/NikoDemon80/ComfyUI-H3-Motion-Conte
 MOTION_CONTEXT_NODE_REV="5335715abe54c1a9bfbe3494da29aae3e8635ce3"
 MOTION_CONTEXT_TEMPLATE_SOURCE="example_workflows/MiniMax H3 - fl2va - ref2va.json"
 MOTION_CONTEXT_TEMPLATE_ALIAS="h3_motion_context_smoke"
-MOTION_CONTEXT_WORKFLOW_TOOL_REV="6aea2d5aa0e209484d1529b6fd213e7c23db6189"
+MOTION_CONTEXT_WORKFLOW_TOOL_REV="${MOTION_CONTEXT_WORKFLOW_TOOL_REV:-$H3_SETUP_SUPPORT_REV}"
 MOTION_CONTEXT_WORKFLOW_TOOL_URL="${MOTION_CONTEXT_WORKFLOW_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_WORKFLOW_TOOL_REV/scripts/h3_motion_context_workflow.py}"
-MOTION_CONTEXT_SMOKE_TOOL_REV="${MOTION_CONTEXT_SMOKE_TOOL_REV:-6aea2d5aa0e209484d1529b6fd213e7c23db6189}"
+MOTION_CONTEXT_SMOKE_TOOL_REV="${MOTION_CONTEXT_SMOKE_TOOL_REV:-$H3_SETUP_SUPPORT_REV}"
 MOTION_CONTEXT_SMOKE_TOOL_URL="${MOTION_CONTEXT_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_SMOKE_TOOL_REV/scripts/h3_motion_context_smoke.py}"
 H3_T8_SMOKE_TOOL_URL="${H3_T8_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py}"
 H3_T8_SMOKE_JOB_TOOL_URL="${H3_T8_SMOKE_JOB_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_smoke_job.py}"

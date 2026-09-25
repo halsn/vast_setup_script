@@ -21,7 +21,7 @@ WORKFLOW_TOOL = ROOT / "scripts" / "h3_motion_context_workflow.py"
 WORKFLOW_SOURCE = ROOT / "tests" / "fixtures" / "h3_motion_context_workflow.json"
 SOURCE = "ComfyUI-H3-Motion-Context"
 TEMPLATE = "h3_motion_context_smoke"
-SMOKE_TOOL_REV = "6aea2d5aa0e209484d1529b6fd213e7c23db6189"
+SMOKE_TOOL_REV = "9734d4b0d34ce350dc9c5b90dee6c1910a9e35f2"
 WORKFLOW_PATH = f"/api/workflow_templates/{SOURCE}/{TEMPLATE}.json"
 NODE_TYPES = (
     "MiniMaxH3MotionContext",
@@ -471,7 +471,7 @@ def test_setup_stages_preflight_tool_when_bootstrap_has_no_sibling_script(
     tmp_path, download_fails
 ):
     text = (ROOT / "scripts" / "setupp_h3_studio.sh").read_text(encoding="utf-8")
-    assert f'MOTION_CONTEXT_SMOKE_TOOL_REV="${{MOTION_CONTEXT_SMOKE_TOOL_REV:-{SMOKE_TOOL_REV}}}"' in text
+    assert 'MOTION_CONTEXT_SMOKE_TOOL_REV="${MOTION_CONTEXT_SMOKE_TOOL_REV:-$H3_SETUP_SUPPORT_REV}"' in text
     assert 'MOTION_CONTEXT_SMOKE_TOOL_URL="${MOTION_CONTEXT_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_SMOKE_TOOL_REV/scripts/h3_motion_context_smoke.py}"' in text
     install_name = "h3_studio_install_motion_context_smoke_tool() {"
     verify_name = "h3_studio_verify_motion_context_smoke() {"
