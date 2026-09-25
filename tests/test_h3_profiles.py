@@ -176,9 +176,33 @@ def test_t8_blockcache_is_installed_only_by_native_profile():
         assert "comfyui-minimax-h3-blockcache-T8.git" not in text, rel
 
 
+def test_studio_bootstrap_fetches_refine_fixed_support_revision():
+    text = (ROOT / STUDIO_SCRIPT).read_text()
+    bootstrap = text[: text.index("\nH3_STUDIO_REPO=")]
+    harness = bootstrap + '\nprintf "%s\\n" "$H3_PROFILE_COMMON_URL" "$H3_PROFILE_BASE_URL"\n'
+    env = os.environ.copy()
+    for name in ("H3_SETUP_SUPPORT_REV", "H3_PROFILE_COMMON_URL", "H3_PROFILE_BASE_URL"):
+        env.pop(name, None)
+
+    run = subprocess.run(
+        [BASH, "-c", harness],
+        cwd=ROOT / "scripts",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    expected_revision = "9734d4b0d34ce350dc9c5b90dee6c1910a9e35f2"
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.splitlines() == [
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{expected_revision}/scripts/h3_profile_common.sh",
+        f"https://raw.githubusercontent.com/halsn/vast_setup_script/{expected_revision}/scripts/h3_comfui_base.sh",
+    ]
+
+
 def test_open_source_studio_profile_is_pinned_and_health_checked():
     text = (ROOT / STUDIO_SCRIPT).read_text()
-    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-708bed8034d80515a9df63e7a1f46bca96188cca}"' in text
+    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9734d4b0d34ce350dc9c5b90dee6c1910a9e35f2}"' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py' in text
