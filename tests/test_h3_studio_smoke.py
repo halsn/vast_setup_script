@@ -11,6 +11,26 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE = ROOT / "scripts" / "h3_studio_smoke.py"
+T8_DIRECTOR_WEBUI_FIX = ROOT / "scripts" / "h3_t8_director_webui.py"
+
+
+def test_t8_director_workbench_asset_path_is_repaired_idempotently(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<script>import("/extensions/minimax-h3-audio-T8/director/workbench.mjs")</script>',
+        encoding="utf-8",
+    )
+
+    for _ in range(2):
+        result = subprocess.run(
+            [sys.executable, str(T8_DIRECTOR_WEBUI_FIX), str(page)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        html = page.read_text(encoding="utf-8")
+        assert "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs" in html
+        assert "/extensions/minimax-h3-audio-T8/director/workbench.mjs" not in html
 
 
 def test_h3_studio_smoke_help_is_network_free():
@@ -82,9 +102,13 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
 
 
 @contextmanager
-def _serve_get_routes(routes: dict[str, tuple[str, bytes]]):
+def _serve_get_routes(
+    routes: dict[str, tuple[str, bytes]], seen_paths: list[str] | None = None
+):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if seen_paths is not None:
+                seen_paths.append(self.path)
             route = routes.get(self.path)
             if route is None:
                 self.send_response(404)
@@ -192,11 +216,16 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         ]
     }
 
+    comfy_paths: list[str] = []
     comfy_routes = {
         "/object_info": ("application/json", _json_bytes(object_info)),
         "/minimax_h3_t8/director/ui": (
             "text/html; charset=utf-8",
-            "<html><title>曜石导演台</title></html>".encode("utf-8"),
+            (
+                '<html><title>曜石导演台</title><script type="module">'
+                'import("/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs")'
+                "</script></html>"
+            ).encode("utf-8"),
         ),
         "/minimax_h3_t8/director/capabilities": (
             "application/json",
@@ -207,6 +236,10 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
                     {"id": "prompt_relay", "state": "ready"},
                 ],
             }),
+        ),
+        "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs": (
+            "text/javascript",
+            b"export const directorWorkbench = true;",
         ),
         "/workflow_templates": (
             "application/json",
@@ -236,10 +269,11 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         ),
     }
 
-    with _serve_get_routes(comfy_routes) as comfy_url:
+    with _serve_get_routes(comfy_routes, comfy_paths) as comfy_url:
         with _serve_get_routes(studio_routes) as studio_url:
             check_contract(
                 studio_url,
                 comfy_url,
                 timeline_model=timeline_model,
             )
+    assert "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs" in comfy_paths

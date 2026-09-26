@@ -70,6 +70,7 @@ REQUIRED_TIMELINE_NODES = (
 T8_DIRECTOR_NODE = "MiniMaxH3DirectorProjectT8"
 T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"
 T8_DIRECTOR_CAPABILITIES = "/minimax_h3_t8/director/capabilities"
+T8_DIRECTOR_MODULE = "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs"
 T8_DIRECTOR_SCHEMA = "t8.minimax_h3.director_capabilities.v1"
 T8_STUDIO_ENGINE_CAPABILITIES = ("long_video", "prompt_relay")
 T8_TEMPLATE_SOURCE = "comfyui-minimax-h3-audio-T8"
@@ -159,6 +160,11 @@ def check_contract(
     director_html = director_ui.body.decode("utf-8", "replace")
     if "曜石导演台" not in director_html and "Obsidian" not in director_html:
         raise RuntimeError("T8 Obsidian Director UI route returned unexpected content")
+    if T8_DIRECTOR_MODULE not in director_html:
+        raise RuntimeError("T8 Obsidian Director UI references the wrong workbench module URL")
+    workbench_module = request(_url(comfy_url, T8_DIRECTOR_MODULE))
+    if not workbench_module.body:
+        raise RuntimeError("T8 Obsidian Director workbench module is empty")
     capabilities = request(_url(comfy_url, T8_DIRECTOR_CAPABILITIES)).json()
     if capabilities.get("schema") != T8_DIRECTOR_SCHEMA:
         raise RuntimeError(

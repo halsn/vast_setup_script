@@ -47,6 +47,7 @@ MOTION_CONTEXT_SMOKE_TOOL_REV="${MOTION_CONTEXT_SMOKE_TOOL_REV:-$H3_SETUP_SUPPOR
 MOTION_CONTEXT_SMOKE_TOOL_URL="${MOTION_CONTEXT_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$MOTION_CONTEXT_SMOKE_TOOL_REV/scripts/h3_motion_context_smoke.py}"
 H3_T8_SMOKE_TOOL_URL="${H3_T8_SMOKE_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py}"
 H3_T8_SMOKE_JOB_TOOL_URL="${H3_T8_SMOKE_JOB_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_smoke_job.py}"
+H3_T8_DIRECTOR_WEBUI_TOOL_URL="${H3_T8_DIRECTOR_WEBUI_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_t8_director_webui.py}"
 H3_T8_SMOKE_TOOL_DIR="${H3_T8_SMOKE_TOOL_DIR:-/opt/h3-studio-tools}"
 H3_T8_SMOKE_BIN="${H3_T8_SMOKE_BIN:-/usr/local/bin/h3-t8-long-video-smoke}"
 H3_T8_SMOKE_JOB_BIN="${H3_T8_SMOKE_JOB_BIN:-/usr/local/bin/h3-t8-smoke-job}"
@@ -109,6 +110,21 @@ h3_studio_install_runtime_nodes() {
 
   h3_studio_install_pinned_checkout "$T8_NODE_NAME" "$T8_NODE_REPO" "$T8_NODE_REV" "$t8_target"
   h3_profile_install_requirements "$t8_target"
+  local webui_fix_tool="$SCRIPT_DIR/h3_t8_director_webui.py"
+  if [[ ! -f "$webui_fix_tool" ]]; then
+    webui_fix_tool="$(mktemp)" || return 1
+    if ! curl -fsSL --retry 3 --connect-timeout 15 "$H3_T8_DIRECTOR_WEBUI_TOOL_URL" -o "$webui_fix_tool"; then
+      rm -f "$webui_fix_tool"
+      return 1
+    fi
+    if ! "$COMFY_PYTHON" "$webui_fix_tool" "$t8_target/web/director/index.html"; then
+      rm -f "$webui_fix_tool"
+      return 1
+    fi
+    rm -f "$webui_fix_tool"
+  else
+    "$COMFY_PYTHON" "$webui_fix_tool" "$t8_target/web/director/index.html"
+  fi
   h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
 }
 
@@ -683,12 +699,13 @@ h3_studio_verify_t8_director() {
   "$COMFY_PYTHON" - \
     "http://127.0.0.1:$COMFY_PORT/object_info" \
     "http://127.0.0.1:$COMFY_PORT/minimax_h3_t8/director/ui" \
-    "http://127.0.0.1:$COMFY_PORT/minimax_h3_t8/director/capabilities" <<'PY'
+    "http://127.0.0.1:$COMFY_PORT/minimax_h3_t8/director/capabilities" \
+    "http://127.0.0.1:$COMFY_PORT/extensions/$T8_NODE_NAME/director/workbench.mjs" <<'PY'
 import json
 import sys
 import urllib.request
 
-object_info_url, ui_url, capabilities_url = sys.argv[1:]
+object_info_url, ui_url, capabilities_url, workbench_module_url = sys.argv[1:]
 
 try:
     with urllib.request.urlopen(object_info_url, timeout=20) as response:
@@ -711,6 +728,21 @@ except Exception as exc:
 
 if "曜石导演台" not in html and "Obsidian" not in html:
     print("[ERROR] T8 Director UI route returned unexpected content.", file=sys.stderr)
+    raise SystemExit(1)
+
+if "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs" not in html:
+    print("[ERROR] T8 Director UI references the wrong extension module URL.", file=sys.stderr)
+    raise SystemExit(1)
+
+try:
+    with urllib.request.urlopen(workbench_module_url, timeout=20) as response:
+        workbench_module = response.read()
+except Exception as exc:
+    print(f"[ERROR] Could not load T8 Director workbench module: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if not workbench_module:
+    print("[ERROR] T8 Director workbench module is empty.", file=sys.stderr)
     raise SystemExit(1)
 
 try:
