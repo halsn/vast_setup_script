@@ -4,9 +4,13 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"
 # The Workbench supplies its resolved commit so setup-owned companion scripts
 # use the same snapshot as this entry script. Keep a tested pin for standalone runs.
-H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9734d4b0d34ce350dc9c5b90dee6c1910a9e35f2}"
+H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9b70ec88127350526c94de076f2e46861e93502f}"
 H3_PROFILE_COMMON_URL="${H3_PROFILE_COMMON_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh}"
 H3_PROFILE_BASE_URL="${H3_PROFILE_BASE_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh}"
+TIMELINE_PATCH_URL="${TIMELINE_PATCH_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/patches/timeline-director/two-phase-checkpoints.patch}"
+TIMELINE_PATCH_HELPER_URL="${TIMELINE_PATCH_HELPER_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/patches/timeline-director/checkpoint_store.py}"
+TIMELINE_PATCH_TOOL_URL="${TIMELINE_PATCH_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_timeline_director_patch.py}"
+TIMELINE_PATCH_TMP_DIR=""
 COMMON="${SCRIPT_DIR:+$SCRIPT_DIR/h3_profile_common.sh}"
 COMMON_TMP=""
 if [[ ! -f "$COMMON" ]]; then
@@ -79,6 +83,39 @@ cleanup_studio_profile() {
   if [[ -n "${COMMON_TMP:-}" && -f "$COMMON_TMP" ]]; then
     rm -f "$COMMON_TMP"
   fi
+  if [[ -n "$TIMELINE_PATCH_TMP_DIR" && -d "$TIMELINE_PATCH_TMP_DIR" ]]; then
+    rm -rf -- "$TIMELINE_PATCH_TMP_DIR"
+  fi
+}
+
+h3_studio_resolve_timeline_patch_support() {
+  if [[ -f "$SCRIPT_DIR/patches/timeline-director/two-phase-checkpoints.patch" \
+    && -f "$SCRIPT_DIR/patches/timeline-director/checkpoint_store.py" \
+    && -f "$SCRIPT_DIR/scripts/h3_timeline_director_patch.py" ]]; then
+    TIMELINE_PATCH_PATH="$SCRIPT_DIR/patches/timeline-director/two-phase-checkpoints.patch"
+    TIMELINE_PATCH_HELPER_PATH="$SCRIPT_DIR/patches/timeline-director/checkpoint_store.py"
+    TIMELINE_PATCH_TOOL_PATH="$SCRIPT_DIR/scripts/h3_timeline_director_patch.py"
+    return 0
+  fi
+
+  TIMELINE_PATCH_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/h3-timeline-patch.XXXXXX")"
+  mkdir -p "$TIMELINE_PATCH_TMP_DIR/patches/timeline-director" "$TIMELINE_PATCH_TMP_DIR/scripts"
+  TIMELINE_PATCH_PATH="$TIMELINE_PATCH_TMP_DIR/patches/timeline-director/two-phase-checkpoints.patch"
+  TIMELINE_PATCH_HELPER_PATH="$TIMELINE_PATCH_TMP_DIR/patches/timeline-director/checkpoint_store.py"
+  TIMELINE_PATCH_TOOL_PATH="$TIMELINE_PATCH_TMP_DIR/scripts/h3_timeline_director_patch.py"
+  curl -fsSL --retry 3 --connect-timeout 15 "$TIMELINE_PATCH_URL" -o "$TIMELINE_PATCH_PATH" || return 1
+  curl -fsSL --retry 3 --connect-timeout 15 "$TIMELINE_PATCH_HELPER_URL" -o "$TIMELINE_PATCH_HELPER_PATH" || return 1
+  curl -fsSL --retry 3 --connect-timeout 15 "$TIMELINE_PATCH_TOOL_URL" -o "$TIMELINE_PATCH_TOOL_PATH" || return 1
+}
+
+h3_studio_timeline_patch_call() {
+  local mode="$1" target="$2"
+  "$COMFY_PYTHON" "$TIMELINE_PATCH_TOOL_PATH" "$mode" \
+    --repo "$target" \
+    --patch "$TIMELINE_PATCH_PATH" \
+    --helper "$TIMELINE_PATCH_HELPER_PATH" \
+    --revision "$TIMELINE_NODE_REV" \
+    --remote "$TIMELINE_NODE_REPO"
 }
 trap cleanup_studio_profile EXIT
 
@@ -421,11 +458,16 @@ h3_studio_install_timeline_director() {
   local source_template="$target/example_workflows/$TIMELINE_TEMPLATE_SOURCE_NAME.json"
   local alias_template="$target/example_workflows/$TIMELINE_TEMPLATE_ALIAS.json"
   mkdir -p "$COMFY_DIR/custom_nodes"
+  h3_studio_resolve_timeline_patch_support
+  if [[ -d "$target/.git" ]]; then
+    h3_studio_timeline_patch_call prepare "$target"
+  fi
   h3_studio_install_pinned_checkout \
     "$TIMELINE_NODE_NAME" \
     "$TIMELINE_NODE_REPO" \
     "$TIMELINE_NODE_REV" \
     "$target"
+  h3_studio_timeline_patch_call apply "$target"
   h3_profile_install_requirements "$target"
 
   [[ -f "$source_template" ]] || {

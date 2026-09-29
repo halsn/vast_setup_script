@@ -66,6 +66,12 @@ REQUIRED_TIMELINE_NODES = (
     "MiniMaxH3TimelinePlanner",
     "MiniMaxH3FiniteSegmentSampler",
     "MiniMaxH3TimelineSelfLiftSampler",
+    "MiniMaxH3TimelineCheckpointCommit",
+)
+REQUIRED_TWO_PHASE_INPUTS = (
+    "execution_stage",
+    "checkpoint_id",
+    "sampling_fingerprint",
 )
 T8_DIRECTOR_NODE = "MiniMaxH3DirectorProjectT8"
 T8_DIRECTOR_UI = "/minimax_h3_t8/director/ui"
@@ -126,6 +132,16 @@ def request(
         raise RuntimeError(f"{method} {url} failed: {exc}") from exc
 
 
+def response_status(url: str, *, timeout: float = 20) -> tuple[int, bytes]:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"GET {url} failed: {exc}") from exc
+
+
 def check_contract(
     studio_url: str,
     comfy_url: str,
@@ -135,17 +151,17 @@ def check_contract(
     variant = TIMELINE_VARIANTS[timeline_model]
     timeline_unet = str(variant["unet"])
     timeline_steps = int(variant["steps"])
-    print("[1/9] H3 Studio HTTP")
+    print("[1/10] H3 Studio HTTP")
     home = request(_url(studio_url, "/"))
     if home.status != 200:
         raise RuntimeError(f"Studio root returned HTTP {home.status}")
 
-    print("[2/9] H3 Studio -> ComfyUI bridge")
+    print("[2/10] H3 Studio -> ComfyUI bridge")
     status = request(_url(studio_url, "/api/comfyui/status")).json()
     if status.get("up") is not True:
         raise RuntimeError(f"Studio cannot reach ComfyUI: {status}")
 
-    print("[3/9] H3 Studio node contract")
+    print("[3/10] H3 Studio node contract")
     catalog = request(_url(comfy_url, "/object_info"), timeout=30).json()
     missing_studio = [name for name in REQUIRED_STUDIO_NODES if name not in catalog]
     if missing_studio:
@@ -153,7 +169,7 @@ def check_contract(
             "H3 Studio required nodes are missing: " + ", ".join(missing_studio)
         )
 
-    print("[4/9] T8 Obsidian Director")
+    print("[4/10] T8 Obsidian Director")
     if T8_DIRECTOR_NODE not in catalog:
         raise RuntimeError(f"T8 Obsidian Director node is missing: {T8_DIRECTOR_NODE}")
     director_ui = request(_url(comfy_url, T8_DIRECTOR_UI))
@@ -189,7 +205,7 @@ def check_contract(
             "T8 Studio engine capabilities are not ready: " + ", ".join(unready)
         )
 
-    print("[5/9] T8 Long Video + Prompt Relay template")
+    print("[5/10] T8 Long Video + Prompt Relay template")
     templates = request(_url(comfy_url, "/workflow_templates")).json()
     t8_available = templates.get(T8_TEMPLATE_SOURCE) or []
     for template in (T8_LONG_VIDEO_TEMPLATE, T8_LONG_VIDEO_SMOKE_TEMPLATE):
@@ -260,11 +276,36 @@ def check_contract(
             "T8 8s validation preset contract mismatch: " + repr(smoke_contract)
         )
 
-    print("[6/9] Timeline Director nodes")
+    print("[6/10] Timeline Director nodes")
     missing = [name for name in REQUIRED_TIMELINE_NODES if name not in catalog]
     if missing:
         raise RuntimeError(
             "Timeline Director nodes are missing: " + ", ".join(missing)
+        )
+
+    print("[7/10] Timeline Director two-phase checkpoint contract")
+    for node_name in ("MiniMaxH3FiniteSegmentSampler", "MiniMaxH3TimelineSelfLiftSampler"):
+        node_input = catalog[node_name].get("input") or {}
+        names = set(node_input.get("required", {})) | set(node_input.get("optional", {}))
+        missing_inputs = [name for name in REQUIRED_TWO_PHASE_INPUTS if name not in names]
+        if missing_inputs:
+            raise RuntimeError(
+                f"Timeline Director node {node_name} is missing two-phase inputs: "
+                + ", ".join(missing_inputs)
+            )
+    probe = (
+        "/minimax_h3_timeline/checkpoints/not-a-uuid?"
+        + urllib.parse.urlencode({"fingerprint": "0" * 64, "segment_count": 1})
+    )
+    status_code, status_body = response_status(_url(comfy_url, probe))
+    try:
+        status_payload = json.loads(status_body.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        status_payload = {}
+    if status_code != 400 or status_payload.get("status") != "invalid":
+        raise RuntimeError(
+            "Timeline Director checkpoint status route is unavailable or has an unexpected contract: "
+            f"HTTP {status_code} {status_payload}"
         )
 
     def combo_options(node_name: str, input_name: str) -> list[str]:
@@ -283,7 +324,7 @@ def check_contract(
             f"Timeline Director CLIP is not selectable: {TIMELINE_CLIP}"
         )
 
-    print("[7/9] Timeline Director template catalog")
+    print("[8/10] Timeline Director template catalog")
     templates = request(_url(comfy_url, "/workflow_templates")).json()
     available = templates.get(TIMELINE_SOURCE) or []
     if TIMELINE_TEMPLATE not in available:
@@ -291,7 +332,7 @@ def check_contract(
             f"Template {TIMELINE_TEMPLATE!r} is not listed for {TIMELINE_SOURCE!r}"
         )
 
-    print("[8/9] Timeline Director template payload")
+    print("[9/10] Timeline Director template payload")
     path = (
         "/api/workflow_templates/"
         + urllib.parse.quote(TIMELINE_SOURCE, safe="")
@@ -328,7 +369,7 @@ def check_contract(
             f"Timeline Director scheduler mismatch: {scheduler_steps} != {[timeline_steps]}"
         )
 
-    print("[9/9] Cross-surface contract complete")
+    print("[10/10] Cross-surface contract complete")
     print(
         "[OK] H3 Studio + T8 Long Video/Prompt Relay + Timeline Director contract smoke passed"
     )

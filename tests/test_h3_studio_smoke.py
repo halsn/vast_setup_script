@@ -96,6 +96,10 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
     assert '"MiniMaxH3TimelinePlanner"' in text
     assert '"MiniMaxH3FiniteSegmentSampler"' in text
     assert '"MiniMaxH3TimelineSelfLiftSampler"' in text
+    assert '"MiniMaxH3TimelineCheckpointCommit"' in text
+    assert 'REQUIRED_TWO_PHASE_INPUTS = (' in text
+    assert '"sampling_fingerprint"' in text
+    assert "/minimax_h3_timeline/checkpoints/not-a-uuid?" in text
     assert "/api/comfyui/status" in text
     assert "/workflow_templates" in text
 
@@ -103,7 +107,8 @@ def test_h3_studio_smoke_contract_matches_deployed_timeline_alias():
 
 @contextmanager
 def _serve_get_routes(
-    routes: dict[str, tuple[str, bytes]], seen_paths: list[str] | None = None
+    routes: dict[str, tuple[str, bytes] | tuple[str, bytes, int]],
+    seen_paths: list[str] | None = None,
 ):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -114,8 +119,9 @@ def _serve_get_routes(
                 self.send_response(404)
                 self.end_headers()
                 return
-            content_type, body = route
-            self.send_response(200)
+            content_type, body = route[:2]
+            status = route[2] if len(route) == 3 else 200
+            self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -156,6 +162,7 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
     required_t8_long_video_nodes = module["REQUIRED_T8_LONG_VIDEO_NODES"]
     required_studio_nodes = module["REQUIRED_STUDIO_NODES"]
     required_timeline_nodes = module["REQUIRED_TIMELINE_NODES"]
+    two_phase_inputs = module["REQUIRED_TWO_PHASE_INPUTS"]
 
     variant = variants[timeline_model]
     timeline_unet = variant["unet"]
@@ -166,6 +173,12 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         "MiniMaxH3DirectorProjectT8": {},
         **{name: {} for name in required_t8_long_video_nodes},
         **{name: {} for name in required_timeline_nodes},
+        "MiniMaxH3FiniteSegmentSampler": {
+            "input": {"required": {}, "optional": {name: [] for name in two_phase_inputs}}
+        },
+        "MiniMaxH3TimelineSelfLiftSampler": {
+            "input": {"required": {}, "optional": {name: [] for name in two_phase_inputs}}
+        },
         "UNETLoader": {
             "input": {
                 "required": {
@@ -219,6 +232,11 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
     comfy_paths: list[str] = []
     comfy_routes = {
         "/object_info": ("application/json", _json_bytes(object_info)),
+        "/minimax_h3_timeline/checkpoints/not-a-uuid?fingerprint=" + "0" * 64 + "&segment_count=1": (
+            "application/json",
+            _json_bytes({"status": "invalid", "error": "Invalid checkpoint ID"}),
+            400,
+        ),
         "/minimax_h3_t8/director/ui": (
             "text/html; charset=utf-8",
             (
@@ -277,3 +295,4 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
                 timeline_model=timeline_model,
             )
     assert "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs" in comfy_paths
+    assert any(path.startswith("/minimax_h3_timeline/checkpoints/not-a-uuid?") for path in comfy_paths)
