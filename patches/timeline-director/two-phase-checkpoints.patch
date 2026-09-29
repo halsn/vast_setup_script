@@ -1,0 +1,719 @@
+diff --git a/__init__.py b/__init__.py
+index 34d7b55..48b0446 100644
+--- a/__init__.py
++++ b/__init__.py
+@@ -12,6 +12,7 @@ from .minimax_h3_finite_segments import (
+     MiniMaxH3FiniteOutputTrim,
+     MiniMaxH3FiniteSegmentFinalize,
+     MiniMaxH3FiniteSegmentSampler,
++    MiniMaxH3TimelineCheckpointCommit,
+     MiniMaxH3LockedAudioSlice,
+     MiniMaxH3SilentAudioSlice,
+     MiniMaxH3LockAudioLatent,
+@@ -19,6 +20,11 @@ from .minimax_h3_finite_segments import (
+     MiniMaxH3SilentAudioMaster,
+ )
+ from .selflift_runtime import SelfLiftH3Sampler
++from .selflift_runtime.checkpoint_store import register_checkpoint_routes
++import folder_paths
++from server import PromptServer
++
++register_checkpoint_routes(PromptServer.instance.routes, folder_paths.get_output_directory)
+ 
+ NODE_CLASS_MAPPINGS = {
+     "MiniMaxH3TimelineDirector": MiniMaxH3TimelineDirector,
+@@ -26,6 +32,7 @@ NODE_CLASS_MAPPINGS = {
+     "MiniMaxH3TimelineEncoder": MiniMaxH3TimelineEncoder,
+     "MiniMaxH3OmniPromptBridge": MiniMaxH3OmniPromptBridge,
+     "MiniMaxH3FiniteSegmentSampler": MiniMaxH3FiniteSegmentSampler,
++    "MiniMaxH3TimelineCheckpointCommit": MiniMaxH3TimelineCheckpointCommit,
+     "MiniMaxH3FiniteAudioTrimTail": MiniMaxH3FiniteAudioTrimTail,
+     "MiniMaxH3FiniteOutputTrim": MiniMaxH3FiniteOutputTrim,
+     "MiniMaxH3FiniteLatentContinuation": MiniMaxH3FiniteLatentContinuation,
+@@ -44,6 +51,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
+     "MiniMaxH3TimelineEncoder": "MiniMax H3 Plan Encoder",
+     "MiniMaxH3OmniPromptBridge": "MiniMax H3 Omni Media Prompt Bridge",
+     "MiniMaxH3FiniteSegmentSampler": "MiniMax H3 Finite Segment Sampler",
++    "MiniMaxH3TimelineCheckpointCommit": "MiniMax H3 Timeline Checkpoint Commit (Internal)",
+     "MiniMaxH3FiniteAudioTrimTail": "MiniMax H3 Finite Audio Tail Trim (Internal)",
+     "MiniMaxH3FiniteOutputTrim": "MiniMax H3 Finite Output Trim (Internal)",
+     "MiniMaxH3FiniteLatentContinuation": "MiniMax H3 Finite Latent Continuation (Internal)",
+diff --git a/minimax_h3_finite_segments.py b/minimax_h3_finite_segments.py
+index 11b0e0c..e4543b6 100644
+--- a/minimax_h3_finite_segments.py
++++ b/minimax_h3_finite_segments.py
+@@ -22,6 +22,12 @@ from .drift_control_av import (
+     drift_control_step_count,
+     install_drift_control_av_model,
+ )
++from .selflift_runtime.checkpoint_store import (
++    CheckpointError,
++    checkpoint_status,
++    commit_preview,
++    segment_stages,
++)
+ from .minimax_h3_timeline_director import (
+     TimelinePlan,
+     _require_timeline_plan,
+@@ -920,6 +926,9 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+                 io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True),
+                 io.Boolean.Input("continue_audio_latent", display_name="Continue Audio Latent", default=True),
+                 io.Combo.Input("ref_image_size", options=["match", "max"], default="match"),
++                io.Combo.Input("execution_stage", options=["full", "preview", "finalize"], default="full", optional=True),
++                io.String.Input("checkpoint_id", optional=True),
++                io.String.Input("sampling_fingerprint", optional=True),
+             ],
+             outputs=[
+                 io.Latent.Output(display_name="Last Sampled Latent"),
+@@ -932,9 +941,21 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+     @classmethod
+     def execute(
+         cls, model, clip, vae, audio_vae, finite_plan, sampler, sigmas, seed,
+-        continue_audio_latent, ref_image_size="match",
++        continue_audio_latent, ref_image_size="match", execution_stage="full",
++        checkpoint_id="", sampling_fingerprint="",
+     ):
+         finite = _require_finite_plan(finite_plan)
++        stages = segment_stages(execution_stage, finite["segment_count"])
++        if execution_stage != "full":
++            if not finite.get("second_pass"):
++                raise CheckpointError("Preview/finalize requires Timeline Director SelfLift to be enabled")
++            if not checkpoint_id or not sampling_fingerprint:
++                raise CheckpointError("Preview/finalize requires a checkpoint ID and sampling fingerprint")
++        if execution_stage == "finalize":
++            checkpoint_status(
++                folder_paths.get_output_directory(), checkpoint_id,
++                fingerprint=sampling_fingerprint, segment_count=finite["segment_count"],
++            )
+         graph = GraphBuilder()
+         previous_latent = None
+         previous_images = None
+@@ -1007,6 +1028,10 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+                     negative=continuation.out(0), vae=vae,
+                     latent_image=sampling_latent, sampler=sampler, sigmas=sigmas,
+                     seed=int(seed), cfg=1.0, **selflift_settings,
++                    execution_stage=stages[index],
++                    checkpoint_id=checkpoint_id if index == 0 and execution_stage != "full" else "",
++                    sampling_fingerprint=sampling_fingerprint if execution_stage != "full" else "",
++                    segment_count=int(finite["segment_count"]),
+                 )
+             else:
+                 noise = graph.node("RandomNoise", id=f"noise_{number}", noise_seed=int(seed))
+@@ -1054,6 +1079,14 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+             previous_images = images.out(0)
+             last_sampled = sampled.out(0)
+ 
++        if execution_stage == "preview":
++            last_sampled = graph.node(
++                "MiniMaxH3TimelineCheckpointCommit", id="commit_timeline_checkpoint",
++                latent=last_sampled, checkpoint_id=checkpoint_id,
++                fingerprint=sampling_fingerprint,
++                segment_count=int(finite["segment_count"]),
++            ).out(0)
++
+         target_output_frames = int(finite.get("target_output_frames") or 0)
+         if target_output_frames > 0:
+             output_trim = graph.node(
+@@ -1132,3 +1165,32 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+         return io.NodeOutput(
+             last_sampled, merged_images, merged_audio, status, expand=graph.finalize()
+         )
++
++
++class MiniMaxH3TimelineCheckpointCommit(io.ComfyNode):
++    """Commit preview readiness only after the complete preview graph succeeds."""
++
++    @classmethod
++    def define_schema(cls):
++        return io.Schema(
++            node_id="MiniMaxH3TimelineCheckpointCommit",
++            display_name="MiniMax H3 Timeline Checkpoint Commit",
++            category="MiniMax H3/Long Video",
++            description="Internal dependency that marks a completed preview checkpoint ready.",
++            inputs=[
++                io.Latent.Input("latent"),
++                io.String.Input("checkpoint_id"),
++                io.String.Input("fingerprint"),
++                io.Int.Input("segment_count", min=1, max=64),
++            ],
++            outputs=[io.Latent.Output(display_name="Committed Preview Latent")],
++        )
++
++    @classmethod
++    def execute(cls, latent, checkpoint_id, fingerprint, segment_count):
++        commit_preview(
++            folder_paths.get_output_directory(), checkpoint_id,
++            fingerprint=fingerprint, segment_count=int(segment_count),
++            metadata={"strategy": "resume_first_then_regenerate_final_av_chain"},
++        )
++        return io.NodeOutput(latent)
+diff --git a/selflift_runtime/checkpoint_store.py b/selflift_runtime/checkpoint_store.py
+new file mode 100644
+index 0000000..79315b4
+--- /dev/null
++++ b/selflift_runtime/checkpoint_store.py
+@@ -0,0 +1,276 @@
++"""Safe filesystem checkpoints for the pinned Timeline Director SelfLift patch."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import os
++import re
++import shutil
++import tempfile
++from pathlib import Path
++from typing import Callable
++from uuid import UUID
++
++
++CHECKPOINT_SCHEMA_VERSION = 1
++CHECKPOINT_SCHEMA = "minimax-h3-timeline-director-checkpoint"
++STATE_FILENAME = "segment-0001.pt"
++MANIFEST_FILENAME = "manifest.json"
++_FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
++
++
++class CheckpointError(ValueError):
++    def __init__(self, message: str, status_code: int = 400):
++        super().__init__(message)
++        self.status_code = status_code
++
++
++def segment_stages(execution_stage: str, segment_count: int) -> tuple[str, ...]:
++    if execution_stage not in {"full", "preview", "finalize"}:
++        raise CheckpointError("execution_stage must be full, preview, or finalize")
++    if isinstance(segment_count, bool) or not isinstance(segment_count, int) or segment_count < 1:
++        raise CheckpointError("segment_count must be a positive integer")
++    if execution_stage == "preview":
++        return ("preview",) * segment_count
++    if execution_stage == "finalize":
++        return ("finalize",) + ("full",) * (segment_count - 1)
++    return ("full",) * segment_count
++
++
++def _checkpoint_id(value: str) -> str:
++    if not isinstance(value, str):
++        raise CheckpointError("Invalid checkpoint ID")
++    try:
++        parsed = UUID(value)
++    except (ValueError, AttributeError) as exc:
++        raise CheckpointError("Invalid checkpoint ID") from exc
++    if parsed.version != 4 or str(parsed) != value:
++        raise CheckpointError("Invalid checkpoint ID")
++    return value
++
++
++def _root(output_directory: str | Path) -> Path:
++    return Path(output_directory).resolve() / "timeline_director_checkpoints"
++
++
++def _directory(output_directory: str | Path, checkpoint_id: str) -> Path:
++    root = _root(output_directory)
++    directory = root / _checkpoint_id(checkpoint_id)
++    resolved_root = root.resolve()
++    resolved = directory.resolve()
++    if resolved.parent != resolved_root:
++        raise CheckpointError("Checkpoint path escapes its managed directory")
++    return directory
++
++
++def _atomic_write(destination: Path, contents: bytes) -> None:
++    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
++    temporary = Path(temporary_name)
++    try:
++        with os.fdopen(descriptor, "wb") as handle:
++            handle.write(contents)
++            handle.flush()
++            os.fsync(handle.fileno())
++        os.replace(temporary, destination)
++    except BaseException:
++        temporary.unlink(missing_ok=True)
++        raise
++
++
++def stage_first_segment(
++    output_directory: str | Path, checkpoint_id: str, tensor_payload: bytes
++) -> Path:
++    if not isinstance(tensor_payload, bytes) or not tensor_payload:
++        raise CheckpointError("First-segment tensor checkpoint is empty")
++    directory = _directory(output_directory, checkpoint_id)
++    directory.mkdir(parents=True, exist_ok=True)
++    state_path = directory / STATE_FILENAME
++    manifest_path = directory / MANIFEST_FILENAME
++    if state_path.exists() or manifest_path.exists():
++        raise CheckpointError("Checkpoint ID has already been used", 409)
++    _atomic_write(state_path, tensor_payload)
++    return state_path
++
++
++def commit_preview(
++    output_directory: str | Path,
++    checkpoint_id: str,
++    *,
++    fingerprint: str,
++    segment_count: int,
++    metadata: dict,
++) -> None:
++    if not isinstance(fingerprint, str) or not _FINGERPRINT.fullmatch(fingerprint):
++        raise CheckpointError("Invalid sampling fingerprint")
++    if isinstance(segment_count, bool) or not isinstance(segment_count, int) or segment_count < 1:
++        raise CheckpointError("segment_count must be a positive integer")
++    if not isinstance(metadata, dict):
++        raise CheckpointError("Checkpoint metadata must be an object")
++
++    directory = _directory(output_directory, checkpoint_id)
++    state_path = directory / STATE_FILENAME
++    if not state_path.is_file() or state_path.is_symlink() or state_path.stat().st_size < 1:
++        raise CheckpointError("First-segment resume state is incomplete", 409)
++    if (directory / MANIFEST_FILENAME).exists():
++        raise CheckpointError("Checkpoint manifest already exists", 409)
++
++    state_digest = hashlib.sha256(state_path.read_bytes()).hexdigest()
++    manifest = {
++        "schema": CHECKPOINT_SCHEMA,
++        "schema_version": CHECKPOINT_SCHEMA_VERSION,
++        "checkpoint_id": _checkpoint_id(checkpoint_id),
++        "fingerprint": fingerprint,
++        "segment_count": segment_count,
++        "resume_segment": 1,
++        "state_file": STATE_FILENAME,
++        "state_size": state_path.stat().st_size,
++        "state_sha256": state_digest,
++        "metadata": metadata,
++    }
++    try:
++        data = json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
++    except (TypeError, ValueError) as exc:
++        raise CheckpointError("Checkpoint metadata is not JSON serializable") from exc
++    _atomic_write(directory / MANIFEST_FILENAME, data)
++
++
++def _read_validated_manifest(
++    output_directory: str | Path,
++    checkpoint_id: str,
++    *,
++    fingerprint: str,
++    segment_count: int,
++) -> tuple[dict, Path]:
++    directory = _directory(output_directory, checkpoint_id)
++    manifest_path = directory / MANIFEST_FILENAME
++    if not manifest_path.is_file() or manifest_path.is_symlink():
++        raise CheckpointError("Checkpoint manifest is missing", 404)
++    try:
++        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
++        raise CheckpointError("Checkpoint manifest is unreadable", 409) from exc
++
++    if not isinstance(manifest, dict):
++        raise CheckpointError("Checkpoint manifest is malformed", 409)
++    if manifest.get("schema") != CHECKPOINT_SCHEMA:
++        raise CheckpointError("Unsupported checkpoint schema", 409)
++    if manifest.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
++        raise CheckpointError("Unsupported checkpoint schema version", 409)
++    if manifest.get("checkpoint_id") != _checkpoint_id(checkpoint_id):
++        raise CheckpointError("Checkpoint ID does not match manifest", 409)
++    if manifest.get("fingerprint") != fingerprint:
++        raise CheckpointError("Sampling fingerprint does not match checkpoint", 409)
++    if manifest.get("segment_count") != segment_count:
++        raise CheckpointError("Timeline segment count does not match checkpoint", 409)
++    if manifest.get("resume_segment") != 1:
++        raise CheckpointError("Checkpoint does not contain the first segment", 409)
++    if manifest.get("state_file") != STATE_FILENAME:
++        raise CheckpointError("Checkpoint state path is invalid", 409)
++
++    state_path = directory / STATE_FILENAME
++    if not state_path.is_file() or state_path.is_symlink():
++        raise CheckpointError("Checkpoint tensor state is missing", 409)
++    state_size = state_path.stat().st_size
++    if state_size < 1 or manifest.get("state_size") != state_size:
++        raise CheckpointError("Checkpoint tensor state size is invalid", 409)
++    digest = hashlib.sha256(state_path.read_bytes()).hexdigest()
++    if manifest.get("state_sha256") != digest:
++        raise CheckpointError("Checkpoint tensor state checksum is invalid", 409)
++    if not isinstance(manifest.get("metadata"), dict):
++        raise CheckpointError("Checkpoint metadata is malformed", 409)
++    return manifest, state_path
++
++
++def checkpoint_status(
++    output_directory: str | Path,
++    checkpoint_id: str,
++    *,
++    fingerprint: str,
++    segment_count: int,
++) -> dict:
++    manifest, _ = _read_validated_manifest(
++        output_directory,
++        checkpoint_id,
++        fingerprint=fingerprint,
++        segment_count=segment_count,
++    )
++    return {
++        "status": "ready",
++        "schema_version": CHECKPOINT_SCHEMA_VERSION,
++        "checkpoint_id": manifest["checkpoint_id"],
++        "fingerprint": manifest["fingerprint"],
++        "segment_count": manifest["segment_count"],
++        "resume_segment": manifest["resume_segment"],
++    }
++
++
++def load_first_segment(
++    output_directory: str | Path,
++    checkpoint_id: str,
++    *,
++    fingerprint: str,
++    segment_count: int,
++    loader: Callable[[Path], object] | None = None,
++) -> tuple[dict, object]:
++    manifest, state_path = _read_validated_manifest(
++        output_directory,
++        checkpoint_id,
++        fingerprint=fingerprint,
++        segment_count=segment_count,
++    )
++    if loader is None:
++        import torch
++
++        loader = lambda path: torch.load(path, map_location="cpu", weights_only=True)
++    return manifest, loader(state_path)
++
++
++def discard_checkpoint(output_directory: str | Path, checkpoint_id: str) -> bool:
++    directory = _directory(output_directory, checkpoint_id)
++    if not directory.exists():
++        return False
++    if directory.is_symlink() or not directory.is_dir():
++        raise CheckpointError("Managed checkpoint path is not a directory", 409)
++    shutil.rmtree(directory)
++    return True
++
++
++def register_checkpoint_routes(route_table, output_directory: Callable[[], str | Path]) -> None:
++    async def get_checkpoint(request):
++        from aiohttp import web
++
++        try:
++            segment_count = int(request.query.get("segment_count", ""))
++            result = checkpoint_status(
++                output_directory(),
++                request.match_info.get("checkpoint_id", ""),
++                fingerprint=request.query.get("fingerprint", ""),
++                segment_count=segment_count,
++            )
++            return web.json_response(result)
++        except (ValueError, CheckpointError) as exc:
++            status_code = exc.status_code if isinstance(exc, CheckpointError) else 400
++            return web.json_response(
++                {"status": "invalid", "error": str(exc)}, status=status_code
++            )
++
++    async def delete_checkpoint_route(request):
++        from aiohttp import web
++
++        try:
++            deleted = discard_checkpoint(
++                output_directory(), request.match_info.get("checkpoint_id", "")
++            )
++            if not deleted:
++                raise CheckpointError("Checkpoint does not exist", 404)
++            return web.json_response({"status": "deleted"})
++        except CheckpointError as exc:
++            return web.json_response(
++                {"status": "invalid", "error": str(exc)}, status=exc.status_code
++            )
++
++    route_table.get("/minimax_h3_timeline/checkpoints/{checkpoint_id}")(get_checkpoint)
++    route_table.delete("/minimax_h3_timeline/checkpoints/{checkpoint_id}")(
++        delete_checkpoint_route
++    )
+diff --git a/selflift_runtime/nodes.py b/selflift_runtime/nodes.py
+index edf0c60..eafb74d 100644
+--- a/selflift_runtime/nodes.py
++++ b/selflift_runtime/nodes.py
+@@ -13,6 +13,7 @@ Two front-ends share the same engine:
+ """
+ 
+ import logging
++import io as pyio
+ import os
+ import time
+ 
+@@ -27,12 +28,18 @@ import comfy.sample
+ import comfy.samplers
+ import comfy.utils
+ import latent_preview
++import folder_paths
+ 
+ from . import selflift
+ from . import h3_upscaler
+ from . import h3_tiling
+ from . import h3_tst
+ from .diagnostics import log_memory
++from .checkpoint_store import (
++    CheckpointError,
++    load_first_segment,
++    stage_first_segment,
++)
+ 
+ 
+ _LOW_CARRY_KEY = "selflift_low_resolution_carry"
+@@ -90,6 +97,133 @@ def _pack(streams, nested):
+     return streams[0]
+ 
+ 
++def _checkpoint_stream_state(value):
++    streams, nested = _streams(value)
++    return {
++        "nested": bool(nested),
++        "streams": [stream.detach().to(device="cpu").contiguous() for stream in streams],
++    }
++
++
++def _restore_checkpoint_stream_state(value, device):
++    if not isinstance(value, dict) or not isinstance(value.get("streams"), list):
++        raise CheckpointError("Checkpoint AV stream state is malformed", 409)
++    streams = value["streams"]
++    if not streams or any(not isinstance(stream, torch.Tensor) for stream in streams):
++        raise CheckpointError("Checkpoint AV tensors are missing", 409)
++    return _pack([stream.to(device) for stream in streams], bool(value.get("nested")))
++
++
++def _checkpoint_tensor_payload(state):
++    buffer = pyio.BytesIO()
++    torch.save(state, buffer)
++    return buffer.getvalue()
++
++
++def resume_progressive_high_resolution(
++    model, positive, negative, latent_image, sampler, sigmas, seed, cfg,
++    transition_step, checkpoint_state, highres_tiling=False, model_hires=None,
++):
++    """Resume the pinned SelfLift high-resolution suffix from a validated checkpoint."""
++    _validate_schedule(sigmas, transition_step)
++    _validate_sampling(model.get_model_object("model_sampling"), sampler)
++    if not checkpoint_state.get("native_av_mask"):
++        raise CheckpointError("Checkpoint does not contain a native H3 AV continuation state", 409)
++
++    expected_streams, expected_nested = _streams(comfy.sample.fix_empty_latent_channels(
++        model, latent_image["samples"], latent_image.get("downscale_ratio_spacial", None),
++        latent_image.get("downscale_ratio_temporal", None)))
++    for name in ("resume_latent", "resume_noise", "high_noise_mask"):
++        value = checkpoint_state.get(name)
++        if (
++            not isinstance(value, dict)
++            or bool(value.get("nested")) != bool(expected_nested)
++            or not isinstance(value.get("streams"), list)
++            or len(value["streams"]) != len(expected_streams)
++        ):
++            raise CheckpointError(f"Checkpoint {name} stream structure does not match this segment", 409)
++        if any(not isinstance(stream, torch.Tensor) for stream in value["streams"]):
++            raise CheckpointError(f"Checkpoint {name} tensor shape does not match this segment", 409)
++        if name == "high_noise_mask":
++            shape_mismatch = any(
++                mask.ndim != expected.ndim
++                or mask.shape[0] != expected.shape[0]
++                or tuple(mask.shape[2:]) != tuple(expected.shape[2:])
++                for mask, expected in zip(value["streams"], expected_streams)
++            )
++        else:
++            shape_mismatch = any(
++                tuple(stream.shape) != tuple(expected.shape)
++                for stream, expected in zip(value["streams"], expected_streams)
++            )
++        if shape_mismatch:
++            raise CheckpointError(f"Checkpoint {name} tensor shape does not match this segment", 409)
++
++    device = comfy.model_management.intermediate_device()
++    resume_latent = _restore_checkpoint_stream_state(checkpoint_state["resume_latent"], device)
++    resume_noise = _restore_checkpoint_stream_state(checkpoint_state["resume_noise"], device)
++    high_noise_mask = _restore_checkpoint_stream_state(checkpoint_state["high_noise_mask"], device)
++    restore_mask = checkpoint_state["video_restore_mask"].to(device)
++    video_anchor = checkpoint_state["video_anchor"].to(device)
++    low_resolution_carry = checkpoint_state["low_resolution_carry"].to(
++        device=comfy.model_management.intermediate_device(),
++        dtype=comfy.model_management.intermediate_dtype(),
++    )
++
++    high_base = model_hires if model_hires is not None else model
++    high_model = h3_tiling.tiled_model(
++        high_base, [tuple(stream.shape) for stream in expected_streams]
++    ) if highres_tiling else high_base
++    high_model = high_model.clone()
++    high_drift_state = high_model.model_options.get(_DRIFT_CONTROL_KEY)
++    if callable(getattr(high_drift_state, "configure_selflift_stage", None)):
++        high_drift_state.configure_selflift_stage(
++            tuple(video_anchor.shape), restore_mask, checkpoint_state["audio_mask"].to(device),
++            hard_lock=False,
++        )
++
++    total_steps = sigmas.shape[-1] - 1
++    evaluations = 0
++    callback = latent_preview.prepare_callback(model, total_steps)
++
++    def callback_high(step, x0, x, total):
++        nonlocal evaluations
++        step = evaluations
++        evaluations += 1
++        if evaluations > total_steps - transition_step:
++            raise RuntimeError("SelfLift: too many resumed high-resolution callbacks")
++        return callback(step + transition_step, x0, x, total_steps)
++
++    out = comfy.samplers.sample(
++        high_model, resume_noise, positive, negative, cfg, model.load_device,
++        sampler, sigmas[transition_step:], high_model.model_options,
++        latent_image=resume_latent, denoise_mask=high_noise_mask,
++        callback=callback_high, disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED,
++        seed=seed,
++    )
++    if evaluations != total_steps - transition_step:
++        raise RuntimeError(
++            f"SelfLift: expected {total_steps - transition_step} resumed high-resolution callbacks, received {evaluations}"
++        )
++
++    if restore_mask is not None and not callable(
++        getattr(high_drift_state, "configure_selflift_stage", None)
++    ):
++        out_streams, out_nested = _streams(out)
++        mask = restore_mask.to(device=out_streams[0].device, dtype=out_streams[0].dtype).expand_as(out_streams[0])
++        restored = out_streams[0] * mask + video_anchor.to(out_streams[0]) * (1.0 - mask)
++        out = _pack([torch.where(mask == 0, video_anchor.to(out_streams[0]), restored)] + out_streams[1:], out_nested)
++
++    result = latent_image.copy()
++    result.pop(_PREVIOUS_LOW_CARRY_KEY, None)
++    result["samples"] = out.to(
++        device=comfy.model_management.intermediate_device(),
++        dtype=comfy.model_management.intermediate_dtype(),
++    )
++    result[_LOW_CARRY_KEY] = low_resolution_carry
++    return result
++
++
+ def _splice_previous_low_tail(low_video, previous_low_carry, prefix_steps):
+     """Replace the low-resolution opening with the preceding native low-res tail."""
+     if isinstance(previous_low_carry, dict):
+@@ -351,8 +485,26 @@ def _debug_dump(vae, latents):
+ 
+ def progressive_sample(model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
+                        transition_step, lowres_scale, rho, w_min, w_max, latent_upsample, latent_lifter=None,
+-                       highres_tiling=False, model_hires=None):
++                       highres_tiling=False, model_hires=None, execution_stage="full",
++                       checkpoint_id="", sampling_fingerprint="", segment_count=0):
+     _validate_schedule(sigmas, transition_step)
++    if execution_stage not in {"full", "preview", "finalize"}:
++        raise CheckpointError("execution_stage must be full, preview, or finalize")
++    if execution_stage == "finalize":
++        _, checkpoint_state = load_first_segment(
++            folder_paths.get_output_directory(), checkpoint_id,
++            fingerprint=sampling_fingerprint, segment_count=segment_count,
++        )
++        if not isinstance(checkpoint_state, dict):
++            raise CheckpointError("First-segment resume state is malformed", 409)
++        if checkpoint_state.get("transition_step") != int(transition_step):
++            raise CheckpointError("SelfLift transition step does not match checkpoint", 409)
++        if checkpoint_state.get("seed") != int(seed):
++            raise CheckpointError("Sampling seed does not match checkpoint", 409)
++        return resume_progressive_high_resolution(
++            model, positive, negative, latent_image, sampler, sigmas, seed, cfg,
++            transition_step, checkpoint_state, highres_tiling, model_hires,
++        )
+     if sigmas.numel() < 2:
+         return latent_image
+     if not 0.25 <= lowres_scale <= 1.0:
+@@ -567,6 +719,24 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
+         raise RuntimeError(f"SelfLift: expected {transition_step} low-resolution callbacks, received {low_evaluations}; check sampler wrappers")
+     low_timer.finish()
+     log_memory("low_resolution end", model.load_device)
++    if execution_stage == "preview" and not checkpoint_id:
++        low_streams, preview_nested = _streams(transition["x0"])
++        preview_video = torch.nn.functional.interpolate(
++            low_streams[0].float(), size=(t, H, W), mode="trilinear", align_corners=False
++        ).to(low_streams[0].dtype)
++        latent_format = model.get_model_object("latent_format")
++        low_resolution_carry = latent_format.process_out(low_streams[0].float()).detach().to(
++            device=comfy.model_management.intermediate_device(),
++            dtype=comfy.model_management.intermediate_dtype(),
++        ).clone()
++        result = latent_image.copy()
++        result.pop(_PREVIOUS_LOW_CARRY_KEY, None)
++        result["samples"] = _pack([preview_video] + audio_streams, preview_nested).to(
++            device=comfy.model_management.intermediate_device(),
++            dtype=comfy.model_management.intermediate_dtype(),
++        )
++        result[_LOW_CARRY_KEY] = low_resolution_carry
++        return result
+     transition_timer = _StageTimer("transition", model.load_device, (H, W), resolution_scale)
+     low_streams, nested = _streams(transition.pop("state"))
+     x0_streams, _ = _streams(transition.pop("x0"))
+@@ -700,6 +870,36 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
+         resume_latent = model.model.process_latent_out(_pack(resume_streams, nested))
+         resume_noise = _pack([torch.zeros_like(s) for s in resume_streams], nested)
+         del resume_streams
++    preview_video = z0_high.detach().clone() if execution_stage == "preview" else None
++    if execution_stage == "preview":
++        if not checkpoint_id or not sampling_fingerprint or segment_count < 1:
++            raise CheckpointError("The first preview segment requires a checkpoint ID and sampling fingerprint")
++        if not native_av_mask or m_full is None or not auxiliary_masks:
++            raise CheckpointError("Two-phase preview requires the native H3 AV continuation mask", 409)
++        state = {
++            "resume_latent": _checkpoint_stream_state(resume_latent),
++            "resume_noise": _checkpoint_stream_state(resume_noise),
++            "high_noise_mask": _checkpoint_stream_state(high_noise_mask),
++            "video_anchor": video_anchor.detach().to(device="cpu").contiguous(),
++            "video_restore_mask": m_full.detach().to(device="cpu").contiguous(),
++            "audio_mask": auxiliary_masks[0].detach().to(device="cpu").contiguous(),
++            "low_resolution_carry": low_resolution_carry.detach().to(device="cpu").contiguous(),
++            "transition_step": int(transition_step),
++            "seed": int(seed),
++            "native_av_mask": True,
++        }
++        stage_first_segment(
++            folder_paths.get_output_directory(), checkpoint_id,
++            _checkpoint_tensor_payload(state),
++        )
++        preview_result = latent_image.copy()
++        preview_result.pop(_PREVIOUS_LOW_CARRY_KEY, None)
++        preview_result["samples"] = _pack([preview_video] + audio_streams, nested).to(
++            device=comfy.model_management.intermediate_device(),
++            dtype=comfy.model_management.intermediate_dtype(),
++        )
++        preview_result[_LOW_CARRY_KEY] = low_resolution_carry
++        return preview_result
+     del next_streams
+     transition_timer.mark("renoise")
+     transition_timer.finish()
+@@ -788,6 +988,10 @@ class SelfLiftH3Sampler:
+         }, "optional": {
+             "model_hires": ("MODEL", {"tooltip": "Optional: model used for the high-resolution stage instead of `model` (e.g. a different checkpoint or LoRA stack). Must share the same architecture and latent format. The low-resolution prefix always runs on `model`."}),
+             "highres_tiling": ("BOOLEAN", {"default": False, "label_on": "高分辨率分块：开启", "label_off": "高分辨率分块：关闭", "tooltip": "Experimental: select 1–8 spatial tiles from available memory at high-resolution preparation. Audio input and references remain complete; only the first tile's audio prediction is retained. Quality and speed may change."}),
++            "execution_stage": (["full", "preview", "finalize"], {"default": "full"}),
++            "checkpoint_id": ("STRING", {"default": ""}),
++            "sampling_fingerprint": ("STRING", {"default": ""}),
++            "segment_count": ("INT", {"default": 0, "min": 0, "max": 64}),
+         }}
+ 
+     RETURN_TYPES = ("LATENT",)
+@@ -795,7 +999,9 @@ class SelfLiftH3Sampler:
+     CATEGORY = "selflift"
+ 
+     def sample(self, model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
+-               transition_step, lowres_scale, rho, w_min, w_max, upscaler_model, model_hires=None, highres_tiling=False):
++               transition_step, lowres_scale, rho, w_min, w_max, upscaler_model, model_hires=None,
++               highres_tiling=False, execution_stage="full", checkpoint_id="",
++               sampling_fingerprint="", segment_count=0):
+         if rho == 0.0 and upscaler_model == "none":
+             raise ValueError(
+                 "SelfLift H3: rho=0 with upscaler_model=none disables both SelfLift-zero correction "
+@@ -810,7 +1016,9 @@ class SelfLiftH3Sampler:
+             )
+         return (progressive_sample(model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
+                                    transition_step, lowres_scale, rho, w_min, w_max, "nearest",
+-                                   latent_lifter=lifter, highres_tiling=highres_tiling, model_hires=model_hires),)
++                                   latent_lifter=lifter, highres_tiling=highres_tiling, model_hires=model_hires,
++                                   execution_stage=execution_stage, checkpoint_id=checkpoint_id,
++                                   sampling_fingerprint=sampling_fingerprint, segment_count=segment_count),)
+ 
+ 
+ class SelfLiftImageSampler:
