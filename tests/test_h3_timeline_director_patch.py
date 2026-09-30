@@ -165,6 +165,6 @@ def test_timeline_patch_apply_requires_the_exact_base_revision(tmp_path):
 
 def test_setup_fetches_patch_from_its_resolved_support_revision():
     text = (ROOT / "scripts" / "setupp_h3_studio.sh").read_text(encoding="utf-8")
-    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9b70ec88127350526c94de076f2e46861e93502f}"' in text
+    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-690d68d02efb218842026f381e8f4afa5c6c0350}"' in text
     assert "$H3_SETUP_SUPPORT_REV/patches/timeline-director/two-phase-checkpoints.patch" in text
     assert "raw.githubusercontent.com/halsn/vast_setup_script/main/patches" not in text

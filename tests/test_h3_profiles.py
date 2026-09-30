@@ -200,7 +200,7 @@ def test_studio_bootstrap_fetches_refine_fixed_support_revision():
         text=True,
     )
 
-    expected_revision = "9b70ec88127350526c94de076f2e46861e93502f"
+    expected_revision = "690d68d02efb218842026f381e8f4afa5c6c0350"
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.splitlines() == [
         f"https://raw.githubusercontent.com/halsn/vast_setup_script/{expected_revision}/scripts/h3_profile_common.sh",
@@ -248,7 +248,7 @@ def test_studio_bootstrap_uses_one_injected_revision_for_all_setup_repo_helpers(
 
 def test_open_source_studio_profile_is_pinned_and_health_checked():
     text = (ROOT / STUDIO_SCRIPT).read_text()
-    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9b70ec88127350526c94de076f2e46861e93502f}"' in text
+    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-690d68d02efb218842026f381e8f4afa5c6c0350}"' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh' in text
     assert '$H3_SETUP_SUPPORT_REV/scripts/h3_t8_long_video_smoke.py' in text

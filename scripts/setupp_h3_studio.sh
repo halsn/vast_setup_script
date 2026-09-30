@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"
 # The Workbench supplies its resolved commit so setup-owned companion scripts
 # use the same snapshot as this entry script. Keep a tested pin for standalone runs.
-H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9b70ec88127350526c94de076f2e46861e93502f}"
+H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-690d68d02efb218842026f381e8f4afa5c6c0350}"
 H3_PROFILE_COMMON_URL="${H3_PROFILE_COMMON_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh}"
 H3_PROFILE_BASE_URL="${H3_PROFILE_BASE_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh}"
 TIMELINE_PATCH_URL="${TIMELINE_PATCH_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/patches/timeline-director/two-phase-checkpoints.patch}"
