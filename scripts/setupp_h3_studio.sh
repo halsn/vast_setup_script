@@ -983,6 +983,7 @@ h3_studio_verify_timeline_director() {
     "$TIMELINE_SOURCE_UNET_NAME" <<'PY'
 import json
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -1013,6 +1014,7 @@ required_nodes = (
     "MiniMaxH3TimelinePlanner",
     "MiniMaxH3FiniteSegmentSampler",
     "MiniMaxH3TimelineSelfLiftSampler",
+    "MiniMaxH3TimelineCheckpointCommit",
 )
 missing = [name for name in required_nodes if name not in catalog]
 if missing:
@@ -1020,6 +1022,50 @@ if missing:
         "[ERROR] Timeline Director nodes are not registered: " + ", ".join(missing),
         file=sys.stderr,
     )
+    raise SystemExit(1)
+
+def input_names(node_name):
+    inputs = catalog[node_name].get("input") or {}
+    return set(inputs.get("required", {})) | set(inputs.get("optional", {}))
+
+for node_name in ("MiniMaxH3FiniteSegmentSampler", "MiniMaxH3TimelineSelfLiftSampler"):
+    missing_inputs = {"execution_stage", "checkpoint_id", "sampling_fingerprint"} - input_names(node_name)
+    if missing_inputs:
+        print(
+            f"[ERROR] Timeline Director {node_name} is missing two-phase inputs: "
+            + ", ".join(sorted(missing_inputs)),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+commit_node = catalog["MiniMaxH3TimelineCheckpointCommit"]
+if (
+    {"latent", "checkpoint_id", "fingerprint", "segment_count"} - input_names("MiniMaxH3TimelineCheckpointCommit")
+    or len(commit_node.get("output", [])) != 1
+):
+    print("[ERROR] Timeline Director checkpoint commit node contract is incomplete.", file=sys.stderr)
+    raise SystemExit(1)
+
+probe_url = object_info_url.rsplit("/", 1)[0] + "/minimax_h3_timeline/checkpoints/not-a-uuid?" + urllib.parse.urlencode(
+    {"fingerprint": "0" * 64, "segment_count": 1}
+)
+try:
+    try:
+        response = urllib.request.urlopen(probe_url, timeout=20)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        probe_status = response.status
+        probe_payload = json.load(response)
+    if (
+        probe_status != 400
+        or not isinstance(probe_payload, dict)
+        or probe_payload.get("status") != "invalid"
+        or probe_payload.get("error") != "Invalid checkpoint ID"
+    ):
+        raise ValueError(f"unexpected checkpoint response: HTTP {probe_status} {probe_payload}")
+except Exception as exc:
+    print(f"[ERROR] Timeline Director checkpoint API is unavailable: {exc}", file=sys.stderr)
     raise SystemExit(1)
 
 def combo_options(node_name, input_name):
@@ -1107,7 +1153,7 @@ if scheduler_steps != [steps]:
     raise SystemExit(1)
 
 print(
-    "[OK] Timeline Director nodes, installed models, and URL-loadable workflow template are ready",
+    "[OK] Timeline Director preview/finalize checkpoints, installed models, and URL-loadable workflow template are ready",
     file=sys.stderr,
 )
 PY

@@ -146,8 +146,107 @@ def _json_bytes(value) -> bytes:
     return json.dumps(value, ensure_ascii=False).encode("utf-8")
 
 
+@pytest.mark.parametrize(
+    "defect",
+    [
+        None,
+        "missing_commit",
+        "missing_commit_input",
+        "wrong_commit_outputs",
+        "missing_finite_input",
+        "missing_selflift_input",
+        "missing_route",
+        "wrong_route_status",
+        "wrong_route_error",
+        "non_json_route",
+    ],
+)
+def test_deployment_timeline_check_requires_gui_two_phase_contract(defect):
+    # Exercise the Python checker that the Bash deployment actually executes.
+    setup = (ROOT / "scripts" / "setupp_h3_studio.sh").read_text(encoding="utf-8")
+    function = setup.split("h3_studio_verify_timeline_director() {", 1)[1]
+    checker = function.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    phase_inputs = {
+        "execution_stage": [["full", "preview", "finalize"], {"default": "full"}],
+        "checkpoint_id": ["STRING", {"default": ""}],
+        "sampling_fingerprint": ["STRING", {"default": ""}],
+    }
+    catalog = {
+        "MiniMaxH3TimelinePlanner": {},
+        "MiniMaxH3FiniteSegmentSampler": {
+            "input": {"required": {}, "optional": dict(phase_inputs)},
+        },
+        "MiniMaxH3TimelineSelfLiftSampler": {
+            "input": {"required": {}, "optional": dict(phase_inputs)},
+        },
+        "MiniMaxH3TimelineCheckpointCommit": {
+            "input": {"required": {
+                "latent": ["LATENT"],
+                "checkpoint_id": ["STRING"],
+                "fingerprint": ["STRING"],
+                "segment_count": ["INT"],
+            }},
+            "output": ["LATENT"],
+        },
+        "UNETLoader": {"input": {"required": {"unet_name": [["test-unet.safetensors"]]}}},
+        "CLIPLoader": {"input": {"required": {"clip_name": [["test-clip.safetensors"]]}}},
+    }
+    if defect == "missing_commit":
+        del catalog["MiniMaxH3TimelineCheckpointCommit"]
+    elif defect == "missing_commit_input":
+        del catalog["MiniMaxH3TimelineCheckpointCommit"]["input"]["required"]["fingerprint"]
+    elif defect == "wrong_commit_outputs":
+        catalog["MiniMaxH3TimelineCheckpointCommit"]["output"] = []
+    elif defect == "missing_finite_input":
+        del catalog["MiniMaxH3FiniteSegmentSampler"]["input"]["optional"]["execution_stage"]
+    elif defect == "missing_selflift_input":
+        del catalog["MiniMaxH3TimelineSelfLiftSampler"]["input"]["optional"]["checkpoint_id"]
+
+    probe = "/minimax_h3_timeline/checkpoints/not-a-uuid?fingerprint=" + "0" * 64 + "&segment_count=1"
+    probe_body = {"status": "invalid", "error": "Invalid checkpoint ID"}
+    if defect == "wrong_route_error":
+        probe_body["error"] = "Unrelated validation failure"
+    routes = {
+        "/object_info": ("application/json", _json_bytes(catalog)),
+        "/workflow_templates": ("application/json", _json_bytes({"test-source": ["test-alias"]})),
+        "/api/workflow_templates/test-source/test-alias.json": (
+            "application/json",
+            _json_bytes({"nodes": [
+                {"type": "UNETLoader", "widgets_values": ["test-unet.safetensors"]},
+                {"type": "CLIPLoader", "widgets_values": ["test-clip.safetensors"]},
+                {"type": "BasicScheduler", "widgets_values_named": {"steps": 8}},
+            ]}),
+        ),
+        probe: (
+            "application/json",
+            b"<html>Bad Request</html>" if defect == "non_json_route" else _json_bytes(probe_body),
+            200 if defect == "wrong_route_status" else 400,
+        ),
+    }
+    if defect == "missing_route":
+        del routes[probe]
+    seen_paths = []
+    with _serve_get_routes(routes, seen_paths) as url:
+        result = subprocess.run(
+            [sys.executable, "-", url + "/object_info", url + "/workflow_templates",
+             url + "/api/workflow_templates", "test-source", "test-alias",
+             "test-unet.safetensors", "test-clip.safetensors", "8", "upstream-unet.safetensors"],
+            input=checker,
+            capture_output=True,
+            text=True,
+        )
+    if defect is None:
+        assert result.returncode == 0, result.stderr
+        assert probe in seen_paths
+        assert "[OK]" in result.stderr
+    else:
+        assert result.returncode != 0, f"Deployment incorrectly accepted {defect}: {result.stderr}"
+        assert "[ERROR]" in result.stderr
+
+
 @pytest.mark.parametrize("timeline_model", ["fused", "native"])
-def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model):
+@pytest.mark.parametrize("defect", [None, "commit_input", "commit_output", "route_error"])
+def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model, defect):
     module = runpy.run_path(str(SMOKE), run_name="h3_studio_smoke_contract_test")
     check_contract = module["check_contract"]
     variants = module["TIMELINE_VARIANTS"]
@@ -179,6 +278,13 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         "MiniMaxH3TimelineSelfLiftSampler": {
             "input": {"required": {}, "optional": {name: [] for name in two_phase_inputs}}
         },
+        "MiniMaxH3TimelineCheckpointCommit": {
+            "input": {"required": {
+                "latent": ["LATENT"], "checkpoint_id": ["STRING"],
+                "fingerprint": ["STRING"], "segment_count": ["INT"],
+            }},
+            "output": ["LATENT"],
+        },
         "UNETLoader": {
             "input": {
                 "required": {
@@ -193,6 +299,10 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
             "input": {"required": {"clip_name": [[timeline_clip]]}}
         },
     }
+    if defect == "commit_input":
+        del object_info["MiniMaxH3TimelineCheckpointCommit"]["input"]["required"]["fingerprint"]
+    elif defect == "commit_output":
+        object_info["MiniMaxH3TimelineCheckpointCommit"]["output"] = []
     t8_workflow = {
         "nodes": [
             {"type": "UNETLoader", "widgets_values": [t8_long_video_unet]},
@@ -234,7 +344,7 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
         "/object_info": ("application/json", _json_bytes(object_info)),
         "/minimax_h3_timeline/checkpoints/not-a-uuid?fingerprint=" + "0" * 64 + "&segment_count=1": (
             "application/json",
-            _json_bytes({"status": "invalid", "error": "Invalid checkpoint ID"}),
+            _json_bytes({"status": "invalid", "error": "Unrelated error" if defect == "route_error" else "Invalid checkpoint ID"}),
             400,
         ),
         "/minimax_h3_t8/director/ui": (
@@ -289,10 +399,12 @@ def test_h3_studio_smoke_read_only_contract_against_fake_services(timeline_model
 
     with _serve_get_routes(comfy_routes, comfy_paths) as comfy_url:
         with _serve_get_routes(studio_routes) as studio_url:
-            check_contract(
-                studio_url,
-                comfy_url,
-                timeline_model=timeline_model,
-            )
+            if defect is None:
+                check_contract(studio_url, comfy_url, timeline_model=timeline_model)
+            else:
+                with pytest.raises(RuntimeError, match="checkpoint"):
+                    check_contract(studio_url, comfy_url, timeline_model=timeline_model)
+    if defect is not None:
+        return
     assert "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs" in comfy_paths
     assert any(path.startswith("/minimax_h3_timeline/checkpoints/not-a-uuid?") for path in comfy_paths)

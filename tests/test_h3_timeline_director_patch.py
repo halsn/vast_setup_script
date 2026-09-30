@@ -111,6 +111,33 @@ def test_timeline_patch_refuses_unrelated_dirty_state_without_removing_it(tmp_pa
     assert (repo / "__init__.py").read_text(encoding="utf-8") == "VALUE = 2\n"
 
 
+def test_timeline_patch_recognizes_managed_helper_across_git_line_endings(tmp_path):
+    repo, patch, helper, revision = _make_fixture(tmp_path)
+    assert _run("apply", repo, patch, helper, revision).returncode == 0
+    managed_helper = repo / "selflift_runtime" / "checkpoint_store.py"
+    managed_helper.write_bytes(b"MANAGED_HELPER = True\n")
+    helper.write_bytes(b"MANAGED_HELPER = True\r\n")
+
+    result = _run("apply", repo, patch, helper, revision)
+
+    assert result.returncode == 0, result.stderr
+    assert managed_helper.read_bytes() == b"MANAGED_HELPER = True\n"
+
+
+def test_timeline_patch_preserves_setup_generated_alias_during_install_and_rerun(tmp_path):
+    repo, patch, helper, revision = _make_fixture(tmp_path)
+    assert _run("prepare", repo, patch, helper, revision).returncode == 0
+    alias = repo / "example_workflows" / "h3_timeline_director.json"
+    alias.parent.mkdir()
+    alias.write_bytes(b'{"nodes": [], "user_notes": "preserve this alias"}\n')
+    before = alias.read_bytes()
+
+    for mode in ("prepare", "apply", "apply", "prepare", "apply"):
+        result = _run(mode, repo, patch, helper, revision)
+        assert result.returncode == 0, result.stderr
+        assert alias.read_bytes() == before
+
+
 def test_timeline_patch_refuses_extra_hunks_in_a_managed_file(tmp_path):
     repo, patch, helper, revision = _make_fixture(tmp_path)
     assert _run("apply", repo, patch, helper, revision).returncode == 0

@@ -51,6 +51,11 @@ def _status(repo: Path) -> list[tuple[str, str]]:
     for item in output.decode("utf-8", "surrogateescape").split("\0"):
         if not item:
             continue
+        # Setup creates this untracked workflow alias; patch operations never touch it.
+        if item == "?? example_workflows/h3_timeline_director.json":
+            alias = repo / "example_workflows/h3_timeline_director.json"
+            if alias.is_file() and not alias.is_symlink():
+                continue
         entries.append((item[:2], item[3:]))
     return entries
 
@@ -105,7 +110,8 @@ def _managed_applied(repo: Path, patch_path: Path, helper_path: Path) -> bool:
         and actual_diff == tracked_patch
         and helper.is_file()
         and not helper.is_symlink()
-        and helper.read_bytes() == helper_path.read_bytes()
+        and helper.read_bytes().replace(b"\r\n", b"\n")
+        == helper_path.read_bytes().replace(b"\r\n", b"\n")
     )
 
 

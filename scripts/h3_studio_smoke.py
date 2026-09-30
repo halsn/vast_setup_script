@@ -284,6 +284,14 @@ def check_contract(
         )
 
     print("[7/10] Timeline Director two-phase checkpoint contract")
+    checkpoint = catalog["MiniMaxH3TimelineCheckpointCommit"]
+    checkpoint_input = checkpoint.get("input") or {}
+    checkpoint_names = set(checkpoint_input.get("required", {})) | set(checkpoint_input.get("optional", {}))
+    if (
+        {"latent", "checkpoint_id", "fingerprint", "segment_count"} - checkpoint_names
+        or len(checkpoint.get("output", [])) != 1
+    ):
+        raise RuntimeError("Timeline Director checkpoint commit node contract is incomplete")
     for node_name in ("MiniMaxH3FiniteSegmentSampler", "MiniMaxH3TimelineSelfLiftSampler"):
         node_input = catalog[node_name].get("input") or {}
         names = set(node_input.get("required", {})) | set(node_input.get("optional", {}))
@@ -302,7 +310,12 @@ def check_contract(
         status_payload = json.loads(status_body.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError):
         status_payload = {}
-    if status_code != 400 or status_payload.get("status") != "invalid":
+    if (
+        status_code != 400
+        or not isinstance(status_payload, dict)
+        or status_payload.get("status") != "invalid"
+        or status_payload.get("error") != "Invalid checkpoint ID"
+    ):
         raise RuntimeError(
             "Timeline Director checkpoint status route is unavailable or has an unexpected contract: "
             f"HTTP {status_code} {status_payload}"
