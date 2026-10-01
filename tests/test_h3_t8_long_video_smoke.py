@@ -2,6 +2,8 @@ from pathlib import Path
 import copy
 import importlib.util
 import json
+import subprocess
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +60,102 @@ def test_runtime_identity_allows_only_generated_workflow_aliases(tmp_path, monke
     monkeypatch.setattr(module, "_git_capture", capture)
     identity = module.verify_runtime_identity(comfy, hash_models=False)
     assert identity["t8_revision"] == module.T8_REVISION
+
+
+def test_runtime_identity_allows_exact_director_url_fix(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+    page = t8 / "web" / "director" / "index.html"
+    page.parent.mkdir(parents=True)
+    committed_page = (
+        '<script>import("/extensions/minimax-h3-audio-T8/director/workbench.mjs")</script>'
+    )
+    page.write_text(
+        committed_page.replace(
+            "/extensions/minimax-h3-audio-T8/",
+            "/extensions/comfyui-minimax-h3-audio-T8/",
+        ),
+        encoding="utf-8",
+    )
+
+    def capture(_root, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return module.T8_REVISION
+        if args and args[0] == "status":
+            return " M web/director/index.html"
+        if args == ("show", "HEAD:web/director/index.html"):
+            return committed_page
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "_git_capture", capture)
+    identity = module.verify_runtime_identity(comfy, hash_models=False)
+    assert identity["t8_revision"] == module.T8_REVISION
+
+
+def test_runtime_identity_accepts_setup_patch_in_real_git_checkout(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    page = t8 / "web" / "director" / "index.html"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        '\n  <script>import("/extensions/minimax-h3-audio-T8/director/workbench.mjs")</script>\n',
+        encoding="utf-8",
+    )
+    for args in (("init", "-q"), ("add", "web/director/index.html"),
+                 ("-c", "user.name=T8 Test", "-c", "user.email=t8-test@example.invalid",
+                  "commit", "-qm", "Pinned Director page")):
+        subprocess.run(["git", "-C", str(t8), *args], check=True, capture_output=True)
+    revision = subprocess.check_output(
+        ["git", "-C", str(t8), "rev-parse", "HEAD"], text=True,
+    ).strip()
+    monkeypatch.setattr(module, "T8_REVISION", revision)
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "h3_t8_director_webui.py"), str(page)],
+        check=True, capture_output=True,
+    )
+
+    identity = module.verify_runtime_identity(comfy, hash_models=False)
+    assert identity["t8_revision"] == revision
+
+    page.write_text(page.read_text(encoding="utf-8") + "unexpected change\n", encoding="utf-8")
+    try:
+        module.verify_runtime_identity(comfy, hash_models=False)
+    except RuntimeError as exc:
+        assert "web/director/index.html" in str(exc)
+    else:
+        raise AssertionError("extra changes to the setup-patched page must fail preflight")
+
+
+def test_runtime_identity_rejects_noncanonical_director_url_fix(tmp_path, monkeypatch):
+    module = load_module()
+    comfy = tmp_path / "ComfyUI"
+    t8 = comfy / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
+    (t8 / ".git").mkdir(parents=True)
+    page = t8 / "web" / "director" / "index.html"
+    page.parent.mkdir(parents=True)
+    committed_page = '<script>import("/extensions/minimax-h3-audio-T8/director/workbench.mjs")</script>'
+    page.write_text(committed_page.replace("workbench.mjs", "modified.mjs"), encoding="utf-8")
+
+    def capture(_root, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return module.T8_REVISION
+        if args and args[0] == "status":
+            return " M web/director/index.html"
+        if args == ("show", "HEAD:web/director/index.html"):
+            return committed_page
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "_git_capture", capture)
+    try:
+        module.verify_runtime_identity(comfy, hash_models=False)
+    except RuntimeError as exc:
+        assert "unexpected tracked/untracked changes" in str(exc)
+        assert "web/director/index.html" in str(exc)
+    else:
+        raise AssertionError("noncanonical Director page changes must fail the release preflight")
 
 
 def test_runtime_identity_rejects_unexpected_untracked_code(tmp_path, monkeypatch):

@@ -29,6 +29,8 @@ from typing import Any, Callable
 
 QUALIFICATION_ID = "h3.t8.stock20-relay-eav-8s.v1"
 T8_REVISION = "2657a6ddf4143998be16d55d24fb03ac0cc5a794"
+T8_DIRECTOR_OLD_MODULE_PATH = "/extensions/minimax-h3-audio-T8/director/workbench.mjs"
+T8_DIRECTOR_INSTALLED_MODULE_PATH = "/extensions/comfyui-minimax-h3-audio-T8/director/workbench.mjs"
 H3_MODEL_REVISION = "0bd506d2e895983a9663037febda27aa3948cf48"
 FPS = 24
 TOTAL_FRAMES = 192
@@ -311,7 +313,7 @@ def _git_capture(root: Path, *args: str) -> str:
             f"Could not inspect pinned T8 checkout at {root}"
             + (f": {detail[:1000]}" if detail else "")
         )
-    return process.stdout.strip()
+    return process.stdout
 
 
 def verify_runtime_identity(
@@ -323,7 +325,7 @@ def verify_runtime_identity(
     t8_root = comfy_root / "custom_nodes" / "comfyui-minimax-h3-audio-T8"
     if not (t8_root / ".git").is_dir():
         raise RuntimeError(f"Pinned T8 checkout is missing or not a git checkout: {t8_root}")
-    revision = _git_capture(t8_root, "rev-parse", "HEAD")
+    revision = _git_capture(t8_root, "rev-parse", "HEAD").strip()
     if revision != T8_REVISION:
         raise RuntimeError(
             f"T8 revision mismatch: expected {T8_REVISION}, got {revision or 'empty'}"
@@ -338,11 +340,27 @@ def verify_runtime_identity(
         "?? example_workflows/h3_t8_long_video_relay.json",
         "?? example_workflows/h3_t8_long_video_relay_smoke.json",
     }
-    unexpected_changes = [
-        line
-        for line in checkout_status.splitlines()
-        if line and line not in allowed_untracked
-    ]
+    unexpected_changes = []
+    for line in checkout_status.splitlines():
+        if not line or line in allowed_untracked:
+            continue
+        if line == " M web/director/index.html":
+            committed_page = _git_capture(
+                t8_root, "show", "HEAD:web/director/index.html"
+            )
+            runtime_page = (t8_root / "web" / "director" / "index.html").read_text(
+                encoding="utf-8"
+            )
+            expected_page = committed_page.replace(
+                T8_DIRECTOR_OLD_MODULE_PATH,
+                T8_DIRECTOR_INSTALLED_MODULE_PATH,
+            )
+            if (
+                T8_DIRECTOR_OLD_MODULE_PATH in committed_page
+                and runtime_page == expected_page
+            ):
+                continue
+        unexpected_changes.append(line)
     if unexpected_changes:
         raise RuntimeError(
             "Pinned T8 checkout contains unexpected tracked/untracked changes: "
