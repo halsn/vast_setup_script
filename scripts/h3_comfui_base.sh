@@ -7,7 +7,7 @@ H3_MIN_COMFYUI_VERSION="${H3_MIN_COMFYUI_VERSION:-0.38.0}"
 H3_MODEL_REPO="${H3_MODEL_REPO:-Comfy-Org/MiniMax-H3}"
 H3_MODEL_REV="${H3_MODEL_REV:-0bd506d2e895983a9663037febda27aa3948cf48}"
 H3_INT8_VIDEO_VAE_REV="e5eb578a89295337b8ff433a035929ce0279e0b6"
-H3_VIDEO_VAE_VARIANT="${H3_VIDEO_VAE_VARIANT:-fp16}"
+H3_VIDEO_VAE_VARIANT="${H3_VIDEO_VAE_VARIANT:-int8}"
 case "$H3_VIDEO_VAE_VARIANT" in
   fp16) H3_VIDEO_VAE_NAME="minimax_h3_video_vae_fp16.safetensors" ;;
   int8) H3_VIDEO_VAE_NAME="minimax_h3_video_vae_int8_convrot.safetensors" ;;
@@ -80,8 +80,8 @@ Usage:
 Environment variables:
   H3_SKIP_UPGRADE=1       Do not update the ComfyUI Git checkout.
   H3_COMFYUI_REF=commit   Override the pinned ComfyUI v0.38.0 commit.
-  H3_VIDEO_VAE_VARIANT=int8
-                           Select the official INT8 video VAE (default: fp16).
+  H3_VIDEO_VAE_VARIANT=fp16
+                           Select the video VAE: int8 (default) or fp16.
   H3_FORCE_REDOWNLOAD=1   Download all H3 models again.
   H3_NO_SAGE=1            Skip SageAttention detection.
   H3_INSTALL_SAGE=0       Disable automatic SageAttention installation.

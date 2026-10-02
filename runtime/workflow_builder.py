@@ -12,7 +12,7 @@ from pathlib import PurePosixPath
 from typing import Any, Mapping, Sequence
 
 
-VIDEO_MODEL = "minimax_h3_video_vae_fp16.safetensors"
+VIDEO_MODEL = "minimax_h3_video_vae_int8_convrot.safetensors"
 AUDIO_MODEL = "minimax_h3_audio_vae_fp32.safetensors"
 TEXT_MODEL = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 FL2VA_MODEL = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
@@ -221,7 +221,7 @@ def build_h3_prompt(
 ) -> dict[str, dict[str, Any]]:
     """Return a ComfyUI API-format graph for one H3 job."""
 
-    if video_vae_name not in {VIDEO_MODEL, "minimax_h3_video_vae_int8_convrot.safetensors"}:
+    if video_vae_name not in {VIDEO_MODEL, "minimax_h3_video_vae_fp16.safetensors"}:
         raise WorkflowBuildError("unsupported video VAE selection")
 
     mode = _TEMPLATE_MODES.get(template_id)

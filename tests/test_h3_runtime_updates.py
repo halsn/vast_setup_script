@@ -150,8 +150,9 @@ model_revision "vae/{VAE}"
     assert all("e5eb578a89295337b8ff433a035929ce0279e0b6" in u for u in item["urls"])
 
 
-def test_fp16_choice_is_preserved_and_int8_choice_is_explicit():
-    assert bash('printf "%s" "$H3_VIDEO_VAE_NAME"') == "minimax_h3_video_vae_fp16.safetensors"
+def test_int8_is_default_and_fp16_remains_an_explicit_choice():
+    assert bash('printf "%s" "$H3_VIDEO_VAE_NAME"') == VAE
+    assert bash(f'H3_VIDEO_VAE_VARIANT=fp16 source "{BASE.as_posix()}"\nprintf "%s" "$H3_VIDEO_VAE_NAME"') == "minimax_h3_video_vae_fp16.safetensors"
     text = BASE.read_text()
     assert 'H3_VIDEO_VAE_VARIANT' in text
     assert '"minimax_h3_video_vae_fp16.safetensors": video_vae_name' in text
@@ -280,12 +281,13 @@ h3_profile_patch_video_vae "{workflow.as_posix()}"
     assert values == [VAE, "minimax_h3_audio_vae_fp32.safetensors"]
 
 
-def test_native_prompt_accepts_selected_int8_vae_without_changing_sampling():
+def test_native_prompt_defaults_to_int8_and_accepts_fp16_without_changing_sampling():
     from runtime.workflow_builder import build_h3_prompt, WorkflowBuildError
     args = ("h3_t2v", "fox", "", {"width": 512, "height": 512, "frames": 124, "seed": 1}, [])
     old = build_h3_prompt(*args)
-    selected = build_h3_prompt(*args, video_vae_name=VAE)
-    assert selected["video_vae"]["inputs"]["vae_name"] == VAE
+    assert old["video_vae"]["inputs"]["vae_name"] == VAE
+    selected = build_h3_prompt(*args, video_vae_name="minimax_h3_video_vae_fp16.safetensors")
+    assert selected["video_vae"]["inputs"]["vae_name"] == "minimax_h3_video_vae_fp16.safetensors"
     selected["video_vae"] = old["video_vae"]
     assert selected == old
     with pytest.raises(WorkflowBuildError):
@@ -303,6 +305,23 @@ def test_installer_applies_guard_and_writes_selected_vae(tmp_path):
     assert source.read_text() == once
     assert json.loads((tmp_path / ".h3-video-vae.json").read_text()) == {"video_vae": VAE}
     assert (tmp_path / "custom_nodes/ComfyUI-H3-RuntimeStatus/__init__.py").is_file()
+
+
+def test_installer_defaults_to_int8(tmp_path):
+    module = load_guard()
+    source = tmp_path / "comfy/ldm/modules/attention.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(SAGE_SOURCE)
+    module.install(tmp_path)
+    assert json.loads((tmp_path / ".h3-video-vae.json").read_text()) == {"video_vae": VAE}
+
+
+def test_worker_defaults_to_int8_but_preserves_saved_fp16_selection(tmp_path):
+    from runtime.worker_gateway import _selected_video_vae
+    assert _selected_video_vae(tmp_path) == VAE
+    selected = "minimax_h3_video_vae_fp16.safetensors"
+    (tmp_path / ".h3-video-vae.json").write_text(json.dumps({"video_vae": selected}))
+    assert _selected_video_vae(tmp_path) == selected
 
 
 def test_status_does_not_claim_a_kernel_was_run_at_startup(monkeypatch):

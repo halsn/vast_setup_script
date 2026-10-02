@@ -8,7 +8,7 @@ import textwrap
 
 
 MARKER = "# H3_SAGE_LAYOUT_GUARD_V1"
-VIDEO_VAES = ("minimax_h3_video_vae_fp16.safetensors", "minimax_h3_video_vae_int8_convrot.safetensors")
+VIDEO_VAES = ("minimax_h3_video_vae_int8_convrot.safetensors", "minimax_h3_video_vae_fp16.safetensors")
 STATUS_SOURCE = '''"""Observed attention calls; configured attention is reported separately."""
 import importlib.metadata
 import time
