@@ -1,0 +1,50 @@
+                trimmed_audio["waveform"] = waveform[..., :output_samples].clone()
+        return io.NodeOutput(trimmed_images, trimmed_audio)
+
+
+class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+    """Expand a finite plan into a standard acyclic sampling graph."""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3FiniteSegmentSampler",
+            display_name="MiniMax H3 Finite Segment Sampler",
+            category="MiniMax H3/Long Video",
+            description=(
+                "Expand a finite plan into a standard acyclic sampling graph. Sampler and scheduler remain "
+                "external; no Loop, Loop Variable, or Close Loop nodes are required."
+            ),
+            enable_expand=True,
+            inputs=[
+                io.Model.Input("model"),
+                io.Clip.Input("clip"),
+                io.Vae.Input("vae"),
+                io.Vae.Input("audio_vae"),
+                FiniteSegmentPlan.Input("finite_plan", display_name="Finite Segment Plan"),
+                io.Sampler.Input("sampler"),
+                io.Sigmas.Input("sigmas"),
+                io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True),
+                io.Boolean.Input("continue_audio_latent", display_name="Continue Audio Latent", default=True),
+                io.Combo.Input("ref_image_size", options=["match", "max"], default="match"),
+            ],
+            outputs=[
+                io.Latent.Output(display_name="Last Sampled Latent"),
+                io.Image.Output(display_name="Merged Frames"),
+                io.Audio.Output(display_name="Merged Audio"),
+                io.String.Output(display_name="Sampling Status"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls, model, clip, vae, audio_vae, finite_plan, sampler, sigmas, seed,
+        continue_audio_latent, ref_image_size="match",
+    ):
+        finite = _require_finite_plan(finite_plan)
+        graph = GraphBuilder()
+        previous_latent = None
+        previous_images = None
+        merged_images = None
+        merged_audio = None
+        last_sampled = None

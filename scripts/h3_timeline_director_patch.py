@@ -13,10 +13,11 @@ from urllib.parse import urlparse
 
 
 HELPER_RELATIVE_PATH = "selflift_runtime/checkpoint_store.py"
-# Exact tracked diffs shipped in 7b02abe and 934d177; never accept local edits.
+# Exact previously shipped tracked diffs; never accept local edits.
 PREVIOUS_PATCH_SHA256 = {
     "5044f3e62978862989d5c7214b48585cdbbed89b2c4cd9c5ba37b20685e9ef38",
     "61c1578c05181ec2aca4baadfdaedfe35315503f9fafc3f32de1986afd684ea9",
+    "53c42f1ae25500e9c6d5f9c424653ad840e92e56595e1b8dd937fee83e358b7e",
 }
 EXPECTED_PATCH_PATHS = {
     "__init__.py",
