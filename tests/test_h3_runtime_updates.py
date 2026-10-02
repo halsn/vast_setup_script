@@ -12,6 +12,7 @@ from tests.test_h3_profiles import BASH
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "scripts/h3_comfui_base.sh"
 PIN = "6b747c0428c343e1417219641db93a4fb7cb69ae"
+SUPPORT_PIN = "638b300291eb0b2f99a0318c705fd139611fa4fb"
 VAE = "minimax_h3_video_vae_int8_convrot.safetensors"
 
 
@@ -30,6 +31,12 @@ def test_base_uses_pinned_current_core_without_upgrading_torch():
     assert result == f"{PIN}|0.38.0"
     text = BASE.read_text(encoding="utf-8")
     assert "--no-deps" in text
+
+
+def test_attention_installer_download_is_pinned_with_studio_companions():
+    assert f'${{H3_SETUP_SUPPORT_REV:-{SUPPORT_PIN}}}/scripts/h3_attention_runtime.py' in BASE.read_text()
+    studio = (ROOT / "scripts/setupp_h3_studio.sh").read_text(encoding="utf-8")
+    assert f'H3_SETUP_SUPPORT_REV="${{H3_SETUP_SUPPORT_REV:-{SUPPORT_PIN}}}"' in studio
 
 
 def test_sage_version_override_upgrades_existing_vast_package():

@@ -45,13 +45,13 @@
 
 - [x] Run the new tests, then the complete repository suite. Parse every shell file, compile modified Python and run `git diff --check`.
 - [x] Review the diff for scope and dependency changes. Verify official VAE metadata at its immutable revision.
-- [ ] Commit/push the update, then pin standalone Studio companion URLs to that commit and publish the pin. Sync only changed release files into the source checkout without replacing unrelated work.
+- [x] Published the runtime update as `638b300291eb0b2f99a0318c705fd139611fa4fb`. Standalone Studio and the common guard now select that immutable companion snapshot; downloaded companion bytes verified. Synced the 15 changed files into the source checkout with backups and preserved unrelated edits and HEAD.
 - [x] Report CPU verification separately from an actual 5090 render. No active remote connection is saved, so deployment and GPU timing require an available instance.
 
 ## Verification evidence
 
 - RED: 10 new checks failed before implementation; VAE integration added 3 failing checks; dependency retry added one failing check.
-- Applicable Windows suite: 208 passed in 57.69 seconds. The 18 tests in test_h3_t8_smoke_job.py require Linux fcntl and cannot run here.
+- Applicable Windows suite: 209 passed in 55.62 seconds after companion pinning. The 18 tests in test_h3_t8_smoke_job.py require Linux fcntl and cannot run here.
 - All setup shell scripts parsed and modified Python compiled; official v0.38.0 attention source patched, compiled, and reapplied identically.
 - Official INT8 VAE immutable revision, size and SHA-256 verified.
 - Dependency installs retry even when the core revision already matches, with installed Torch package constraints.
