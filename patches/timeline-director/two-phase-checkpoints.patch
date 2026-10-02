@@ -430,7 +430,7 @@ index 0000000..79315b4
 +        delete_checkpoint_route
 +    )
 diff --git a/selflift_runtime/nodes.py b/selflift_runtime/nodes.py
-index edf0c60..eafb74d 100644
+index edf0c60..7106bda 100644
 --- a/selflift_runtime/nodes.py
 +++ b/selflift_runtime/nodes.py
 @@ -13,6 +13,7 @@ Two front-ends share the same engine:
@@ -622,7 +622,25 @@ index edf0c60..eafb74d 100644
      if sigmas.numel() < 2:
          return latent_image
      if not 0.25 <= lowres_scale <= 1.0:
-@@ -567,6 +719,24 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
+@@ -361,6 +513,17 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
+         raise ValueError("SelfLift: rho must be between 0 and 1")
+     if not 0.0 <= w_min <= w_max <= 1.0:
+         raise ValueError("SelfLift: weights must satisfy 0 <= w_min <= w_max <= 1")
++    if execution_stage == "preview" and checkpoint_id and latent_image.get("noise_mask") is None:
++        av_streams, av_nested = _streams(latent_image["samples"])
++        if av_nested:
++            # The first text-to-AV segment has no continuation anchor. Both
++            # streams are entirely generated, but checkpoint resume needs
++            # explicit native masks just like later continuation segments.
++            latent_image = latent_image.copy()
++            latent_image["noise_mask"] = _pack([
++                torch.ones((s.shape[0], 1, *s.shape[2:]), dtype=torch.float32, device=s.device)
++                for s in av_streams
++            ], True)
+     noise_masks = _validate_latent_input(latent_image)
+     if highres_tiling and noise_masks is not None:
+         raise ValueError("SelfLift: noise_mask is not compatible with highres_tiling")
+@@ -567,6 +730,24 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
          raise RuntimeError(f"SelfLift: expected {transition_step} low-resolution callbacks, received {low_evaluations}; check sampler wrappers")
      low_timer.finish()
      log_memory("low_resolution end", model.load_device)
@@ -647,11 +665,21 @@ index edf0c60..eafb74d 100644
      transition_timer = _StageTimer("transition", model.load_device, (H, W), resolution_scale)
      low_streams, nested = _streams(transition.pop("state"))
      x0_streams, _ = _streams(transition.pop("x0"))
-@@ -700,6 +870,36 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
+@@ -655,6 +836,10 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
+                                              latent_image.get("batch_index", None)).to(z0_high)
+     video_state = model_sampling.noise_scaling(sigma_k, video_noise, z0_high)
+     next_streams = [_euler_step(video_state, z0_high, sigma_k, sigma_next)] + auxiliary_next
++    preview_video = (
++        latent_format.process_out(z0_high).detach().clone()
++        if execution_stage == "preview" else None
++    )
+     del z0_high, video_noise, video_state, auxiliary_next
+     if native_av_mask:
+         # Maintain a second, full-resolution continuation chain alongside the
+@@ -700,6 +885,35 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
          resume_latent = model.model.process_latent_out(_pack(resume_streams, nested))
          resume_noise = _pack([torch.zeros_like(s) for s in resume_streams], nested)
          del resume_streams
-+    preview_video = z0_high.detach().clone() if execution_stage == "preview" else None
 +    if execution_stage == "preview":
 +        if not checkpoint_id or not sampling_fingerprint or segment_count < 1:
 +            raise CheckpointError("The first preview segment requires a checkpoint ID and sampling fingerprint")
@@ -684,7 +712,7 @@ index edf0c60..eafb74d 100644
      del next_streams
      transition_timer.mark("renoise")
      transition_timer.finish()
-@@ -788,6 +988,10 @@ class SelfLiftH3Sampler:
+@@ -788,6 +1002,10 @@ class SelfLiftH3Sampler:
          }, "optional": {
              "model_hires": ("MODEL", {"tooltip": "Optional: model used for the high-resolution stage instead of `model` (e.g. a different checkpoint or LoRA stack). Must share the same architecture and latent format. The low-resolution prefix always runs on `model`."}),
              "highres_tiling": ("BOOLEAN", {"default": False, "label_on": "高分辨率分块：开启", "label_off": "高分辨率分块：关闭", "tooltip": "Experimental: select 1–8 spatial tiles from available memory at high-resolution preparation. Audio input and references remain complete; only the first tile's audio prediction is retained. Quality and speed may change."}),
@@ -695,7 +723,7 @@ index edf0c60..eafb74d 100644
          }}
  
      RETURN_TYPES = ("LATENT",)
-@@ -795,7 +999,9 @@ class SelfLiftH3Sampler:
+@@ -795,7 +1013,9 @@ class SelfLiftH3Sampler:
      CATEGORY = "selflift"
  
      def sample(self, model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
@@ -706,7 +734,7 @@ index edf0c60..eafb74d 100644
          if rho == 0.0 and upscaler_model == "none":
              raise ValueError(
                  "SelfLift H3: rho=0 with upscaler_model=none disables both SelfLift-zero correction "
-@@ -810,7 +1016,9 @@ class SelfLiftH3Sampler:
+@@ -810,7 +1030,9 @@ class SelfLiftH3Sampler:
              )
          return (progressive_sample(model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
                                     transition_step, lowres_scale, rho, w_min, w_max, "nearest",

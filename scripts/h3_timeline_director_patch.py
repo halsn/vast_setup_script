@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
@@ -12,6 +13,11 @@ from urllib.parse import urlparse
 
 
 HELPER_RELATIVE_PATH = "selflift_runtime/checkpoint_store.py"
+# Exact tracked diffs shipped in 7b02abe and 934d177; never accept local edits.
+PREVIOUS_PATCH_SHA256 = {
+    "5044f3e62978862989d5c7214b48585cdbbed89b2c4cd9c5ba37b20685e9ef38",
+    "61c1578c05181ec2aca4baadfdaedfe35315503f9fafc3f32de1986afd684ea9",
+}
 EXPECTED_PATCH_PATHS = {
     "__init__.py",
     "minimax_h3_finite_segments.py",
@@ -24,9 +30,9 @@ class PatchError(RuntimeError):
     pass
 
 
-def _git(repo: Path, *args: str) -> bytes:
+def _git(repo: Path, *args: str, input_data: bytes | None = None) -> bytes:
     result = subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, check=False
+        ["git", *args], cwd=repo, input=input_data, capture_output=True, check=False
     )
     if result.returncode:
         detail = result.stderr.decode("utf-8", "replace").strip()
@@ -93,8 +99,11 @@ def _patch_parts(patch_path: Path) -> tuple[bytes, bytes]:
     return tracked.encode("utf-8"), sections[HELPER_RELATIVE_PATH].encode("utf-8")
 
 
-def _managed_applied(repo: Path, patch_path: Path, helper_path: Path) -> bool:
-    tracked_patch, _ = _patch_parts(patch_path)
+def _managed_applied(
+    repo: Path, patch_path: Path, helper_path: Path, tracked_patch: bytes | None = None
+) -> bool:
+    if tracked_patch is None:
+        tracked_patch, _ = _patch_parts(patch_path)
     actual_diff = _git(
         repo, "-c", "core.autocrlf=true", "diff", "--no-ext-diff", "--binary"
     ).replace(b"\r\n", b"\n")
@@ -134,12 +143,25 @@ def prepare(repo: Path, patch_path: Path, helper_path: Path, revision: str, remo
     if not status:
         return
     current = _git(repo, "rev-parse", "HEAD").decode().strip()
-    if current != revision or not _managed_applied(repo, patch_path, helper_path):
+    tracked_patch, helper_patch = _patch_parts(patch_path)
+    if not _managed_applied(repo, patch_path, helper_path):
+        previous = _git(repo, "-c", "core.autocrlf=true", "diff", "--no-ext-diff", "--binary").replace(b"\r\n", b"\n")
+        if (
+            hashlib.sha256(previous).hexdigest() in PREVIOUS_PATCH_SHA256
+            and _managed_applied(repo, patch_path, helper_path, previous)
+        ):
+            tracked_patch = previous
+        else:
+            raise PatchError(
+                "Refusing to reset Timeline Director: local changes are not exactly the managed patch"
+            )
+    if current != revision:
         raise PatchError(
             "Refusing to reset Timeline Director: local changes are not exactly the managed patch"
         )
-    _git(repo, "apply", "--reverse", "--check", str(patch_path))
-    _git(repo, "apply", "--reverse", str(patch_path))
+    reversible_patch = tracked_patch + helper_patch
+    _git(repo, "apply", "--reverse", "--check", "-", input_data=reversible_patch)
+    _git(repo, "apply", "--reverse", "-", input_data=reversible_patch)
     if _status(repo) or (repo / HELPER_RELATIVE_PATH).exists():
         raise PatchError("Managed Timeline Director patch did not reverse to a clean checkout")
 

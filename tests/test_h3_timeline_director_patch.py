@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import importlib.util
 import subprocess
 import sys
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH_TOOL = ROOT / "scripts" / "h3_timeline_director_patch.py"
@@ -163,8 +167,30 @@ def test_timeline_patch_apply_requires_the_exact_base_revision(tmp_path):
     assert (repo / "__init__.py").read_text(encoding="utf-8") == "VALUE = 3\n"
 
 
+@pytest.mark.parametrize("user_edit", [False, True])
+def test_timeline_patch_upgrade_accepts_only_the_audited_previous_diff(tmp_path, monkeypatch, user_edit):
+    repo, patch, helper, revision = _make_fixture(tmp_path)
+    assert _run("apply", repo, patch, helper, revision).returncode == 0
+    spec = importlib.util.spec_from_file_location("patch_tool", PATCH_TOOL)
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    previous_diff = tool._git(repo, "-c", "core.autocrlf=true", "diff", "--no-ext-diff", "--binary").replace(b"\r\n", b"\n")
+    monkeypatch.setattr(tool, "PREVIOUS_PATCH_SHA256", {hashlib.sha256(previous_diff).hexdigest()}, raising=False)
+    updated = tmp_path / "updated.patch"
+    updated.write_text(patch.read_text(encoding="utf-8").replace("VALUE = 2", "VALUE = 3"), encoding="utf-8")
+    if user_edit:
+        (repo / "__init__.py").write_text("VALUE = 2\nUSER_CHANGE = True\n", encoding="utf-8")
+        with pytest.raises(tool.PatchError, match="Refusing"):
+            tool.prepare(repo, updated, helper, revision, REMOTE)
+        assert "USER_CHANGE" in (repo / "__init__.py").read_text(encoding="utf-8")
+    else:
+        tool.prepare(repo, updated, helper, revision, REMOTE)
+        assert (repo / "__init__.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+        assert not (repo / "selflift_runtime/checkpoint_store.py").exists()
+
+
 def test_setup_fetches_patch_from_its_resolved_support_revision():
     text = (ROOT / "scripts" / "setupp_h3_studio.sh").read_text(encoding="utf-8")
-    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-690d68d02efb218842026f381e8f4afa5c6c0350}"' in text
+    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-d8012a751a10ee475529941eca773a6df98b7572}"' in text
     assert "$H3_SETUP_SUPPORT_REV/patches/timeline-director/two-phase-checkpoints.patch" in text
     assert "raw.githubusercontent.com/halsn/vast_setup_script/main/patches" not in text

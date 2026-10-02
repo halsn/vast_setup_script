@@ -1,0 +1,6 @@
+        raise ValueError("SelfLift: rho must be between 0 and 1")
+    if not 0.0 <= w_min <= w_max <= 1.0:
+        raise ValueError("SelfLift: weights must satisfy 0 <= w_min <= w_max <= 1")
+    noise_masks = _validate_latent_input(latent_image)
+    if highres_tiling and noise_masks is not None:
+        raise ValueError("SelfLift: noise_mask is not compatible with highres_tiling")

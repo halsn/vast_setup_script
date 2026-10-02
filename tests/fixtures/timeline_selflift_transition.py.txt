@@ -1,0 +1,54 @@
+    # evaluation, then complete that Euler interval without another denoiser call.
+    video_noise = comfy.sample.prepare_noise(z0_high, (seed + 1) % (1 << 64),
+                                             latent_image.get("batch_index", None)).to(z0_high)
+    video_state = model_sampling.noise_scaling(sigma_k, video_noise, z0_high)
+    next_streams = [_euler_step(video_state, z0_high, sigma_k, sigma_next)] + auxiliary_next
+    del z0_high, video_noise, video_state, auxiliary_next
+    if native_av_mask:
+        # Maintain a second, full-resolution continuation chain alongside the
+        # native low-resolution carry. The current segment's complete low-res
+        # prediction is lifted first, then the preceding final HQ tail becomes
+        # the clean opening anchor for the remaining high-resolution steps.
+        # Drift-Control owns the temporal release; there is deliberately no
+        # post-sampling hard paste of this anchor.
+        high_video_anchor = video_anchor.clone()
+        if drift_continuation:
+            logging.debug(
+                "[SelfLift HQ continuation] previous final high-resolution tail "
+                "anchors %d opening token(s) through Drift-Control",
+                int(drift_state.prefix_steps),
+            )
+        # Audio deliberately remains the original clean stream so locked
+        # speech/music is preserved exactly throughout the high stage.
+        high_anchor_latent = _pack([high_video_anchor] + audio_streams, nested)
+        anchor_streams, _ = _streams(high_model.model.process_latent_in(high_anchor_latent))
+        noise_scale = float(getattr(model_sampling, "noise_scale", 1.0))
+        # Native inpaint needs a CLEAN anchor for both streams. Reconstruct
+        # resume noise so unmasked tokens start from SelfLift's lifted state:
+        # state = sigma * noise_scale * noise + (1-sigma) * clean.
+        # In locked video tokens use ordinary unit noise, not the potentially
+        # large solved residual (H3 uses a small noise augmentation on guides).
+        resume_noise_streams = []
+        for stream_index, (state, anchor) in enumerate(zip(next_streams, anchor_streams)):
+            sigma = sigma_next.to(device=state.device, dtype=state.dtype)
+            clean = anchor.to(device=state.device, dtype=state.dtype)
+            resumed_noise = (state - (1.0 - sigma) * clean) / (sigma * noise_scale)
+            if stream_index == 0:
+                guide_noise = comfy.sample.prepare_noise(
+                    clean, (seed + 1) % (1 << 64), latent_image.get("batch_index", None)
+                ).to(clean)
+                resumed_noise = torch.where(m_full.to(device=state.device) == 0, guide_noise, resumed_noise)
+                del guide_noise
+            resume_noise_streams.append(resumed_noise)
+        resume_latent = high_anchor_latent
+        resume_noise = _pack(resume_noise_streams, nested)
+        del anchor_streams, resume_noise_streams, resumed_noise, high_video_anchor
+    else:
+        resume_streams = [model_sampling.inverse_noise_scaling(sigma_next, s) for s in next_streams]
+        resume_latent = model.model.process_latent_out(_pack(resume_streams, nested))
+        resume_noise = _pack([torch.zeros_like(s) for s in resume_streams], nested)
+        del resume_streams
+    del next_streams
+    transition_timer.mark("renoise")
+    transition_timer.finish()
+    log_memory("transition end / high_resolution start", model.load_device)
