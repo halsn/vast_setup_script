@@ -28,7 +28,7 @@
 - [x] Pin author's `madebyollin/taehv` TAEH3 artifact at an immutable revision, record bytes and SHA-256, and download to `models/vae_approx` during Studio setup. Verify source configuration through mocked downloads. Enable the preview path at Studio scope while keeping final INT8 VAE selection unchanged.
 - [x] Confirm sampler callback/preview support in pinned ComfyUI and SelfLift. Preview errors must not silently modify sampling or swallow CUDA failures.
 - [x] Run setup regression checks, patch syntax/application checks and client build. Record actual mock hit/miss compute counts; do not label them as measured GPU speedups.
-- [ ] Publish reviewed commits, update standalone companion pin, and synchronize only changed files into the user's working source without overwriting existing edits. Report how existing installations receive the update.
+- [x] Publish reviewed commits, update standalone companion pin, and synchronize only changed files into the user's working source without overwriting existing edits. Report how existing installations receive the update.
 
 ## Acceptance
 
@@ -48,5 +48,13 @@
 - Broader Windows setup run: 236 passed, 18 failed because the unchanged Linux T8 smoke launcher imports `fcntl`. The baseline launcher at `35a62ba` reproduces that import failure. This run is not a clean full-suite result.
 - No GPU renders or remote service restarts were performed. First unique-input generation speed and 5090 image quality are unmeasured.
 
-- Final setup combination: 97 mocks passed before adding two preserved legacy tracked-edit migration cases; the cache and installer suite passed32. Real patched encoder requests red/blue/blue computed image VAE1, audio VAE1, tokenizer2 and scheduled CLIP2; cached blue matched fresh blue.
+- Final setup combination: 99 mocks passed after updating the standalone companion pin, both in the isolated branch and in the synchronized working source. The actual patched encoder was exercised with CPU mock models: requests red/blue/blue computed image VAE once, audio VAE once, tokenizer twice and scheduled CLIP twice; cached blue matched fresh blue.
 - Pinned plugin migration at `309b626973d049b073e93557ff94603efc2d1272`: exact prior patch reversal, new apply, idempotent apply, and final reversal passed. Both helper sources match their embedded patch content; drift is rejected before file mutation.
+- Setup payload `9e7f378` and companion-pin commit `03e2156` were published to `main` and `codex/h3-director-quality-speed`. Downloaded public payload/helper/script bytes matched their Git objects. Client commit `b1be205` was published to its feature branch and its six changed files were merged into the existing client source.
+- Source synchronization used three-way merges with backups, preserving existing edits. Shell syntax and Python compilation checks passed after synchronization.
+
+## Receiving the update
+
+- The local client source and built frontend already contain the changes; reload or reopen the client page to load the new frontend.
+- New Studio installations through the current setup `main` receive the exact encoding helper and pinned TAEH3 preview decoder. Existing servers need the updated Studio setup to install the backend changes and start ComfyUI with the preview option.
+- No registered remote instance was available during delivery, so no existing server was upgraded or restarted. Functional validation used mocks only; GPU speed and final image quality remain unmeasured.
