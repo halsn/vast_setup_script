@@ -797,7 +797,7 @@ install_attention_runtime() {
     tmp="$(mktemp)"
     tool="$tmp"
     curl -fsSL --retry 3 --connect-timeout 15 \
-      "https://raw.githubusercontent.com/halsn/vast_setup_script/${H3_SETUP_SUPPORT_REV:-638b300291eb0b2f99a0318c705fd139611fa4fb}/scripts/h3_attention_runtime.py" -o "$tool"
+      "https://raw.githubusercontent.com/halsn/vast_setup_script/${H3_SETUP_SUPPORT_REV:-28f4bb42303771edd7c59f26f249fbd2b15c4b84}/scripts/h3_attention_runtime.py" -o "$tool"
   fi
   "$COMFY_PYTHON" "$tool" --comfy-dir "$COMFY_DIR" --video-vae "$H3_VIDEO_VAE_NAME"
   [[ -z "$tmp" ]] || rm -f "$tmp"

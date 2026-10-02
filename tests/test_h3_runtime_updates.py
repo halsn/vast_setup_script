@@ -12,7 +12,7 @@ from tests.test_h3_profiles import BASH
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "scripts/h3_comfui_base.sh"
 PIN = "6b747c0428c343e1417219641db93a4fb7cb69ae"
-SUPPORT_PIN = "638b300291eb0b2f99a0318c705fd139611fa4fb"
+SUPPORT_PIN = "28f4bb42303771edd7c59f26f249fbd2b15c4b84"
 VAE = "minimax_h3_video_vae_int8_convrot.safetensors"
 
 
