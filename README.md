@@ -16,6 +16,22 @@
 
 内部 base core 负责官方 H3 节点/模型、SageAttention、工作流和基础健康检查；共享 profile helper 负责所有模式都需要的 VideoHelperSuite、3D Refine、`MpiSaveLatent` / `MpiLoadLatent`；Turbo/PDD/VDN/Cache/FastH3 只追加自己的加速节点、LoRA、checkpoint 或 runtime。
 
+### 当前基础运行时
+
+- ComfyUI 固定为 v0.38.0（`6b747c0428c343e1417219641db93a4fb7cb69ae`），可用 `H3_COMFYUI_REF` 指定其它提交。保留 Vast 镜像的 Python、PyTorch 和 CUDA；升级核心时安装配套的非 Torch 依赖。
+- SageAttention 默认 2.2.0（包含 2++）。即使镜像已安装旧版，也会比较实际版本并升级；`H3_SAGE_VERSION` 指定的版本生效。安装使用 `--no-deps`，随后在独立进程运行小型 CUDA 内核，检查输出有限性及与 SDPA 的差异。这个检查不代表 H3 长视频性能或画质验证。
+- 通用 Sage 调用先处理连续内存布局；达到 int32 元素索引上限时提前使用 PyTorch。非法内存访问或设备断言不再继续尝试同一 CUDA 上下文。Timeline Director 的已有保护保持生效。
+- 新增官方 INT8 ConvRot 视频 VAE，文件大小和 SHA-256 对照固定模型提交验证。FP16 仍为默认；设置 `H3_VIDEO_VAE_VARIANT=int8` 可切换 setup 生成的原生模板、T8 标准模板、Timeline 和 Motion Context 别名，以及 Worker 原生 API 工作流。T8 Stock20 发布验证仍使用原先的 FP16 VAE。已有用户项目保留其保存的模型选择，亦可在 VAE 选择器中手动切换。
+- `GET /h3/runtime_status` 返回配置后端、最近观察到的通用 Sage 调用后端、回退次数/原因和包版本。尚未调用时 `last_backend=null`；观察范围限于通用 Sage 路径。Worker `/ready` 优先使用此实时信息，并以 `worker_backend` 单独保留原来的兼容配置；旧实例没有状态接口时显示 `unknown`，不把兼容配置当成实际 GPU 加速证明。
+
+在保存好的脚本上启用 INT8 视频 VAE：
+
+```bash
+H3_VIDEO_VAE_VARIANT=int8 bash setupp_h3_studio.sh
+```
+
+运行 setup 会停止并重启 ComfyUI，请在任务队列空闲时应用。当前更新没有切换到 SageAttention3、Python 3.13 或新版 PyTorch，也没有更改机器筛选配置。
+
 因此 **Native、Turbo、PDD、VDN、Cache、FastH3 默认都具备生成后高清增强能力**，不再单独提供 Refine deployment profile。
 
 ## H3 部署 profiles

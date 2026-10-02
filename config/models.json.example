@@ -2,6 +2,17 @@
   "schema_version": 1,
   "models": [
     {
+      "id": "minimax-h3-video-vae-int8-convrot",
+      "filename": "minimax_h3_video_vae_int8_convrot.safetensors",
+      "urls": [
+        "https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/e5eb578a89295337b8ff433a035929ce0279e0b6/vae/minimax_h3_video_vae_int8_convrot.safetensors",
+        "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/e5eb578a89295337b8ff433a035929ce0279e0b6/vae/minimax_h3_video_vae_int8_convrot.safetensors"
+      ],
+      "size_bytes": 2811065184,
+      "sha256": "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e",
+      "subdir": "vae"
+    },
+    {
       "id": "minimax-h3-fl2va-pruned-int8-convrot",
       "filename": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
       "urls": [

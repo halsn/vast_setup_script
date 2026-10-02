@@ -196,26 +196,18 @@ def test_enhancer_readiness_requires_both_object_info_nodes() -> None:
         server.server_close()
 
 
-def test_native_comfyui_minimum_updates_032_but_default_stays_at_030() -> None:
+def test_native_comfyui_minimum_rejects_old_core_and_accepts_038() -> None:
     base_script = ROOT / "scripts" / "h3_comfui_base.sh"
     script = r'''
 H3_BOOTSTRAP_LIB_ONLY=1
 source "$1"
 COMFY_DIR="/tmp/comfy-fixture"
-use_vast_comfy_base() { return 0; }
 get_comfyui_version() { printf '%s\n' "$CURRENT_VERSION"; }
-update_git_checkout() { printf 'UPDATE:%s:%s\n' "$1" "$2"; }
-CURRENT_VERSION="0.32.1"
-H3_MIN_COMFYUI_VERSION="0.33.0"
-update_comfyui
-CURRENT_VERSION="0.30.0"
-unset H3_MIN_COMFYUI_VERSION
-update_comfyui
+CURRENT_VERSION="$2"
+ensure_comfyui_version
 '''
-
-    result = _run_bash(script, _bash_path(base_script))
-
-    assert result.returncode == 0, result.stderr
-    assert "UPDATE:/tmp/comfy-fixture:ComfyUI" in result.stdout
-    assert result.stdout.count("UPDATE:") == 1
-    assert "0.30.0" in result.stderr
+    old = _run_bash(script, _bash_path(base_script), "0.32.1")
+    assert old.returncode != 0
+    assert "requires 0.38.0" in old.stderr
+    current = _run_bash(script, _bash_path(base_script), "0.38.0")
+    assert current.returncode == 0, current.stderr

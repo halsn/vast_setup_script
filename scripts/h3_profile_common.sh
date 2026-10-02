@@ -37,6 +37,9 @@ h3_profile_cleanup() {
 h3_profile_load_base() {
   local base_script="" local_base="" download_url="$H3_PROFILE_BASE_URL" cachebust
   local_base="${H3_PROFILE_SCRIPT_DIR:+$H3_PROFILE_SCRIPT_DIR/h3_comfui_base.sh}"
+  if [[ -f "${H3_PROFILE_SCRIPT_DIR:-}/h3_attention_runtime.py" ]]; then
+    H3_ATTENTION_RUNTIME_TOOL="$H3_PROFILE_SCRIPT_DIR/h3_attention_runtime.py"
+  fi
 
   if [[ "${H3_PROFILE_USE_LOCAL_BASE:-0}" == "1" ]]; then
     [[ -n "$local_base" && -f "$local_base" ]] \
@@ -72,6 +75,27 @@ h3_profile_install_requirements() {
   local node_dir="$1" requirements="$1/requirements.txt"
   [[ -f "$requirements" ]] || return 0
   "$COMFY_PYTHON" -m pip install -r "$requirements"
+}
+
+h3_profile_patch_video_vae() {
+  "$COMFY_PYTHON" - "$1" "$H3_VIDEO_VAE_NAME" <<'PY'
+import json, os, sys
+from pathlib import Path
+path, selected = Path(sys.argv[1]), sys.argv[2]
+names = {"minimax_h3_video_vae_fp16.safetensors", "minimax_h3_video_vae_int8_convrot.safetensors"}
+def rewrite(value):
+    if isinstance(value, dict):
+        return {key: rewrite(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [rewrite(child) for child in value]
+    return selected if isinstance(value, str) and value in names else value
+original = path.read_text(encoding="utf-8")
+updated = rewrite(json.loads(original))
+if updated != json.loads(original):
+    temporary = path.with_suffix(".json.h3-tmp")
+    temporary.write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+PY
 }
 
 h3_profile_install_node() {

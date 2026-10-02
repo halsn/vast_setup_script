@@ -217,8 +217,12 @@ def build_h3_prompt(
     assets: Sequence[Mapping[str, Any]],
     *,
     gpu_memory_mib: int | None = None,
+    video_vae_name: str = VIDEO_MODEL,
 ) -> dict[str, dict[str, Any]]:
     """Return a ComfyUI API-format graph for one H3 job."""
+
+    if video_vae_name not in {VIDEO_MODEL, "minimax_h3_video_vae_int8_convrot.safetensors"}:
+        raise WorkflowBuildError("unsupported video VAE selection")
 
     mode = _TEMPLATE_MODES.get(template_id)
     if mode is None:
@@ -241,6 +245,7 @@ def build_h3_prompt(
         pdd_file=pdd_file if acceleration == "pdd" else None,
         gpu_memory_mib=gpu_memory_mib,
     )
+    workflow["video_vae"]["inputs"]["vae_name"] = video_vae_name
 
     if mode in {"t2v", "i2v"}:
         conditioner_inputs: dict[str, Any] = {

@@ -49,7 +49,7 @@ main_native() {
       ;;
   esac
 
-  H3_MIN_COMFYUI_VERSION="0.33.0"
+  H3_MIN_COMFYUI_VERSION="${H3_MIN_COMFYUI_VERSION:-0.38.0}"
   export H3_MIN_COMFYUI_VERSION
   h3_profile_prepare_base
   h3_profile_install_pinned_node "$T8_PROMPT_ENHANCER_NODE" "$T8_PROMPT_ENHANCER_REPO" "$T8_PROMPT_ENHANCER_REV"

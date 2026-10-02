@@ -11,11 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from aiohttp import ClientError, ClientSession, WSMsgType, web
+from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 from yarl import URL
 
 from runtime.worker_readiness import ReadinessError, build_ready_payload
-from runtime.workflow_builder import WorkflowBuildError, build_h3_prompt
+from runtime.workflow_builder import VIDEO_MODEL, WorkflowBuildError, build_h3_prompt
 
 
 ALLOWED_PATHS = frozenset(
@@ -29,6 +29,7 @@ ALLOWED_PATHS = frozenset(
         "/queue",
         "/interrupt",
         "/system_stats",
+        "/h3/runtime_status",
         "/view",
         "/upload/image",
         "/ws",
@@ -205,6 +206,21 @@ async def _dispatch(request: web.Request) -> web.StreamResponse:
             )
         except ReadinessError as exc:
             raise GatewayError(503, "worker_not_ready") from exc
+        payload["worker_backend"] = payload["backend"]
+        payload["attention"] = {"configured_backend": None, "last_backend": None,
+                                "status": "unavailable"}
+        # The worker's compatibility profile is not evidence of ComfyUI's backend.
+        payload["backend"] = "unknown"
+        try:
+            url = request.app[CONFIG_KEY].upstream_url / "h3/runtime_status"
+            async with request.app[SESSION_KEY].get(url, timeout=ClientTimeout(total=2)) as upstream:
+                if upstream.status == 200:
+                    observed = await upstream.json()
+                    if isinstance(observed, dict) and isinstance(observed.get("configured_backend"), str):
+                        payload["attention"] = observed
+                        payload["backend"] = observed.get("last_backend") or observed["configured_backend"]
+        except (ClientError, asyncio.TimeoutError, ValueError):
+            pass
         return web.json_response(payload)
     if request.path.startswith("/history/"):
         local_job_id = request.path.removeprefix("/history/")
@@ -248,6 +264,7 @@ async def _handle_prompt(request: web.Request) -> web.StreamResponse:
             payload["parameters"],
             payload.get("assets", []),
             gpu_memory_mib=_runtime_memory_mib(request.app[CONFIG_KEY].runtime_config_path),
+            video_vae_name=_selected_video_vae(request.app[CONFIG_KEY].comfyui_dir),
         )
     except (KeyError, TypeError, WorkflowBuildError) as exc:
         raise GatewayError(400, "invalid_submission") from exc
@@ -269,6 +286,13 @@ async def _handle_prompt(request: web.Request) -> web.StreamResponse:
     local_job_id = payload["job_id"]
     request.app[JOB_MAPPINGS_KEY][local_job_id] = remote_job_id
     return web.json_response({"remote_job_id": remote_job_id, "prompt_id": remote_job_id})
+
+
+def _selected_video_vae(comfyui_dir: Path) -> str:
+    path = comfyui_dir / ".h3-video-vae.json"
+    if not path.is_file():
+        return VIDEO_MODEL
+    return json.loads(path.read_text(encoding="utf-8"))["video_vae"]
 
 
 def _is_logical_submission(payload: object) -> bool:

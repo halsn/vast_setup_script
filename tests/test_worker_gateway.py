@@ -51,12 +51,54 @@ class WorkerGatewayTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status, 503)
 
+    async def test_ready_reports_live_comfy_attention_and_keeps_worker_profile_separate(self):
+        root = Path(self.tempdir.name)
+        (root / "runtime.json").write_text(json.dumps({
+            "status": "ready", "backend": "sdpa", "models": [],
+            "gpu": {"name": "RTX 5090", "total_memory_mib": 32768, "compute_capability": [12, 0]},
+        }))
+        observed = {"configured_backend": "sage", "last_backend": "pytorch",
+                    "last_fallback_reason": "int32 guard", "versions": {"sageattention": "2.2.0"}}
+        async def status(request):
+            return web.json_response(observed)
+        upstream = web.Application()
+        upstream.router.add_get("/h3/runtime_status", status)
+        server = TestServer(upstream)
+        await server.start_server()
+        gateway = TestClient(TestServer(create_app(
+            token="test-token", upstream_url=str(server.make_url("")),
+            runtime_config_path=str(root / "runtime.json"),
+            template_catalog_path=str(root / "templates.json"), comfyui_dir=str(root / "ComfyUI"),
+        )))
+        await gateway.start_server()
+        try:
+            for last in ("pytorch", "sage", None):
+                observed["last_backend"] = last
+                response = await gateway.get("/ready", headers={"Authorization": "Bearer test-token"})
+                self.assertEqual(response.status, 200)
+                payload = await response.json()
+                self.assertEqual(payload["backend"], last or "sage")
+                self.assertEqual(payload["worker_backend"], "sdpa")
+                self.assertEqual(payload["attention"], observed)
+            observed.clear()
+            response = await gateway.get("/ready", headers={"Authorization": "Bearer test-token"})
+            self.assertEqual((await response.json())["backend"], "unknown")
+        finally:
+            await gateway.close()
+            await server.close()
+
     async def test_logical_job_history_and_interrupt_use_remote_prompt_id(self):
         interrupt_payloads = []
+        comfy = Path(self.tempdir.name) / "ComfyUI"
+        comfy.mkdir()
+        (comfy / ".h3-video-vae.json").write_text(json.dumps({
+            "video_vae": "minimax_h3_video_vae_int8_convrot.safetensors"}))
 
         async def prompt(request):
             body = await request.json()
             self.assertIn("prompt", body)
+            self.assertEqual(body["prompt"]["video_vae"]["inputs"]["vae_name"],
+                             "minimax_h3_video_vae_int8_convrot.safetensors")
             return web.json_response({"prompt_id": "remote-job"})
 
         async def history(request):

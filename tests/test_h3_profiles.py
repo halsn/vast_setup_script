@@ -162,7 +162,7 @@ def test_cache_profile_owns_cache_implementation():
 
 def test_t8_prompt_enhancer_is_installed_only_by_native_profile():
     native = (ROOT / NATIVE_SCRIPT).read_text()
-    assert 'H3_MIN_COMFYUI_VERSION="0.33.0"' in native
+    assert 'H3_MIN_COMFYUI_VERSION="${H3_MIN_COMFYUI_VERSION:-0.38.0}"' in native
     install = native.index("h3_profile_install_pinned_node")
     finish = native.index("h3_profile_finish")
     verify = native.index("h3_profile_verify_t8_prompt_enhancer")

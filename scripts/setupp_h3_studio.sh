@@ -188,6 +188,7 @@ h3_studio_install_motion_context_template() {
   if [[ "$workflow_tool" != "$SCRIPT_DIR/h3_motion_context_workflow.py" ]]; then
     rm -f "$workflow_tool"
   fi
+  h3_profile_patch_video_vae "$alias_template"
   h3_profile_info "Motion Context FL2VA template installed: $MOTION_CONTEXT_TEMPLATE_ALIAS."
 }
 
@@ -380,6 +381,7 @@ if actual_smoke != expected_smoke:
 PY
 
   h3_profile_info "T8 standard template installed: $T8_LONG_VIDEO_TEMPLATE_ALIAS (30s 736x416 Stock20)."
+  h3_profile_patch_video_vae "$standard_template"
   h3_profile_info "T8 validation template installed: $T8_LONG_VIDEO_SMOKE_TEMPLATE_ALIAS (8s 512x288, 2 segments)."
 }
 h3_studio_install_t8_release_smoke_tool() {
@@ -545,6 +547,7 @@ os.replace(temporary, path)
 PY
 
   h3_profile_info "Timeline Director URL template alias installed: $TIMELINE_TEMPLATE_ALIAS"
+  h3_profile_patch_video_vae "$alias_template"
   h3_profile_info "Timeline Director alias uses $TIMELINE_UNET_NAME + $TIMELINE_CLIP_NAME with $TIMELINE_DEFAULT_STEPS steps."
   h3_profile_info "Pinned MiniMax H3 Timeline Director installed at $TIMELINE_NODE_REV."
 }

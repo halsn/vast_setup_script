@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-H3_BOOTSTRAP_VERSION="1.1.11"
+H3_BOOTSTRAP_VERSION="1.2.0"
+H3_COMFYUI_REF="${H3_COMFYUI_REF:-6b747c0428c343e1417219641db93a4fb7cb69ae}"
+H3_MIN_COMFYUI_VERSION="${H3_MIN_COMFYUI_VERSION:-0.38.0}"
 H3_MODEL_REPO="${H3_MODEL_REPO:-Comfy-Org/MiniMax-H3}"
 H3_MODEL_REV="${H3_MODEL_REV:-0bd506d2e895983a9663037febda27aa3948cf48}"
+H3_INT8_VIDEO_VAE_REV="e5eb578a89295337b8ff433a035929ce0279e0b6"
+H3_VIDEO_VAE_VARIANT="${H3_VIDEO_VAE_VARIANT:-fp16}"
+case "$H3_VIDEO_VAE_VARIANT" in
+  fp16) H3_VIDEO_VAE_NAME="minimax_h3_video_vae_fp16.safetensors" ;;
+  int8) H3_VIDEO_VAE_NAME="minimax_h3_video_vae_int8_convrot.safetensors" ;;
+  *) printf '[ERROR] H3_VIDEO_VAE_VARIANT must be fp16 or int8.\n' >&2; return 1 2>/dev/null || exit 1 ;;
+esac
+export H3_VIDEO_VAE_NAME
+H3_SAGE_VERSION="${H3_SAGE_VERSION:-2.2.0}"
 H3_STAGE="startup"
 H3_INSTALL_SAGE="${H3_INSTALL_SAGE:-1}"
 H3_SAGE_REQUIRED="${H3_SAGE_REQUIRED:-1}"
@@ -68,6 +79,9 @@ Usage:
 
 Environment variables:
   H3_SKIP_UPGRADE=1       Do not update the ComfyUI Git checkout.
+  H3_COMFYUI_REF=commit   Override the pinned ComfyUI v0.38.0 commit.
+  H3_VIDEO_VAE_VARIANT=int8
+                           Select the official INT8 video VAE (default: fp16).
   H3_FORCE_REDOWNLOAD=1   Download all H3 models again.
   H3_NO_SAGE=1            Skip SageAttention detection.
   H3_INSTALL_SAGE=0       Disable automatic SageAttention installation.
@@ -606,44 +620,50 @@ update_git_checkout() {
 
 update_comfyui() {
   H3_STAGE="updating ComfyUI"
-  if use_vast_comfy_base; then
-    local current min_version="${H3_MIN_COMFYUI_VERSION:-0.30.0}"
-    current="$(get_comfyui_version 2>/dev/null || true)"
-    if [[ -n "$current" ]] && version_at_least "$current" "$min_version"; then
-      log_info "Vast.ai ComfyUI base detected with ComfyUI $current; core update skipped."
-      return 0
-    fi
-    if [[ "${H3_SKIP_UPGRADE:-0}" == "1" ]]; then
-      die "ComfyUI ${current:-unknown} is below $min_version; unset H3_SKIP_UPGRADE so the core can be updated."
-    fi
-    log_warn "Vast.ai ComfyUI base has ComfyUI ${current:-unknown}; updating to satisfy MiniMax H3 >=$min_version."
-  fi
   if [[ "${H3_SKIP_UPGRADE:-0}" == "1" ]]; then
     log_warn "H3_SKIP_UPGRADE=1; ComfyUI core update skipped."
     return 0
   fi
-  update_git_checkout "$COMFY_DIR" "ComfyUI"
+  local current selected stamp
+  current="$(git -C "$COMFY_DIR" rev-parse HEAD)"
+  selected="$(git -C "$COMFY_DIR" rev-parse "$H3_COMFYUI_REF^{commit}" 2>/dev/null || true)"
+  if [[ "$current" == "${selected:-$H3_COMFYUI_REF}" ]]; then
+    log_ok "ComfyUI already at the selected revision: $current"
+    return 0
+  fi
+  git -C "$COMFY_DIR" fetch --depth=1 origin "$H3_COMFYUI_REF"
+  if [[ -n "$(git -C "$COMFY_DIR" status --porcelain)" ]]; then
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    git -C "$COMFY_DIR" stash push -u -m "before-h3-bootstrap-$stamp"
+    log_warn "ComfyUI local changes were stashed as before-h3-bootstrap-$stamp"
+  fi
+  git -C "$COMFY_DIR" checkout --detach FETCH_HEAD
   H3_COMFYUI_CORE_UPDATED=1
 }
 
 update_python_dependencies() {
   H3_STAGE="updating Python dependencies"
-  if use_vast_comfy_base && (( H3_COMFYUI_CORE_UPDATED == 0 )); then
-    log_info "Vast.ai ComfyUI base detected; base Python dependency upgrade skipped."
-    return 0
-  fi
   if use_vast_comfy_base; then
-    log_info "ComfyUI core was updated; installing only its non-Torch dependencies."
+    log_info "Ensuring ComfyUI dependencies while preserving the installed Torch packages."
   fi
   local pip_version
   pip_version="$("$COMFY_PYTHON" -m pip --version)"
   log_info "Using existing system-managed pip; skipping pip self-upgrade: $pip_version"
   local requirements_file="/tmp/h3-comfyui-requirements.txt"
+  local constraints_file="/tmp/h3-comfyui-torch-constraints.txt"
+  "$COMFY_PYTHON" - > "$constraints_file" <<'PY'
+import importlib.metadata
+for package in ("torch", "torchvision", "torchaudio"):
+    try:
+        print(f"{package}=={importlib.metadata.version(package)}")
+    except importlib.metadata.PackageNotFoundError:
+        pass
+PY
   grep -Ev '^(torch|torchvision|torchaudio)([<=>].*)?$' \
     "$COMFY_DIR/requirements.txt" > "$requirements_file"
-  "$COMFY_PYTHON" -m pip install -U -r "$requirements_file"
-  rm -f "$requirements_file"
-  "$COMFY_PYTHON" -m pip install -U huggingface_hub hf_xet
+  "$COMFY_PYTHON" -m pip install -U -c "$constraints_file" -r "$requirements_file"
+  "$COMFY_PYTHON" -m pip install -U -c "$constraints_file" huggingface_hub hf_xet
+  rm -f "$requirements_file" "$constraints_file"
 }
 
 install_or_update_node() {
@@ -725,32 +745,21 @@ install_sageattention() {
     SAGE_STATUS="$(detect_sageattention)"
     return 0
   fi
-  if use_vast_comfy_base; then
-    SAGE_STATUS="$(detect_sageattention)"
-    if [[ "$SAGE_STATUS" == "installed" ]]; then
-      log_ok "SageAttention provided by the Vast.ai ComfyUI base; installation skipped."
+  local version="$H3_SAGE_VERSION" installed
+  installed="$("$COMFY_PYTHON" -c 'import importlib.metadata; print(importlib.metadata.version("sageattention"))' 2>/dev/null || true)"
+  if [[ "$installed" != "$version" ]]; then
+    log_info "Installing SageAttention $version (current: ${installed:-missing}) without changing Torch/CUDA."
+    "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation "sageattention==${version}" || {
+      SAGE_STATUS="not-installed-no-verified-wheel"
+      [[ "${H3_SAGE_REQUIRED:-0}" != "1" ]] || die "SageAttention installation failed. Check CUDA_HOME, nvcc, and the Torch/CUDA match."
       return 0
-    fi
-    if [[ "${H3_SAGE_REQUIRED:-0}" == "1" ]]; then
-      die "Vast.ai ComfyUI base does not provide a verified SageAttention import. Set H3_USE_VAST_COMFY_BASE=0 to allow installation."
-    fi
-    log_warn "Vast.ai ComfyUI base has no verified SageAttention import; continuing without installation."
-    return 0
+    }
+    installed="$("$COMFY_PYTHON" -c 'import importlib.metadata; print(importlib.metadata.version("sageattention"))' 2>/dev/null || true)"
   fi
-  if [[ "$(detect_sageattention)" == "installed" ]]; then
-    SAGE_STATUS="installed"
-    log_ok "SageAttention is already installed."
-    return 0
-  fi
-
-  local version="${H3_SAGE_VERSION:-2.2.0}"
-  log_info "Installing SageAttention $version without changing the existing Torch/CUDA packages."
-  if "$COMFY_PYTHON" -m pip install \
-    --no-build-isolation \
-    "sageattention==${version}"; then
-    if [[ "$(detect_sageattention)" == "installed" ]]; then
+  if [[ "$installed" == "$version" && "$(detect_sageattention)" == "installed" ]]; then
+    if verify_sageattention_kernel; then
       SAGE_STATUS="installed"
-      log_ok "SageAttention $version installed. Add KJNodes 'Patch Sage Attention' to the H3 workflow."
+      log_ok "SageAttention $version passed a real CUDA kernel check."
       return 0
     fi
   fi
@@ -760,6 +769,38 @@ install_sageattention() {
     die "SageAttention installation or import verification failed. Check CUDA_HOME, nvcc, and the Torch/CUDA match."
   fi
   log_warn "SageAttention installation failed; continuing with ComfyUI's default attention."
+}
+
+verify_sageattention_kernel() {
+  "$COMFY_PYTHON" - <<'PY'
+import torch
+from sageattention import sageattn
+
+if not torch.cuda.is_available():
+    raise SystemExit("SageAttention verification requires a CUDA GPU")
+torch.manual_seed(123)
+q, k, v = [torch.randn(1, 4, 128, 128, device="cuda", dtype=torch.float16) for _ in range(3)]
+result = sageattn(q, k, v, tensor_layout="HND", is_causal=False)
+torch.cuda.synchronize()
+reference = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+if result.shape != reference.shape or not torch.isfinite(result).all().item():
+    raise SystemExit("SageAttention CUDA kernel produced an invalid result")
+torch.testing.assert_close(result, reference, atol=0.1, rtol=0.1)
+print(f"[OK] Sage CUDA kernel: GPU={torch.cuda.get_device_name()} SM={torch.cuda.get_device_capability()} Torch={torch.__version__} CUDA={torch.version.cuda}")
+PY
+}
+
+install_attention_runtime() {
+  local tool tmp=""
+  tool="${H3_ATTENTION_RUNTIME_TOOL:-}"
+  if [[ -z "$tool" || ! -f "$tool" ]]; then
+    tmp="$(mktemp)"
+    tool="$tmp"
+    curl -fsSL --retry 3 --connect-timeout 15 \
+      "https://raw.githubusercontent.com/halsn/vast_setup_script/${H3_SETUP_SUPPORT_REV:-main}/scripts/h3_attention_runtime.py" -o "$tool"
+  fi
+  "$COMFY_PYTHON" "$tool" --comfy-dir "$COMFY_DIR" --video-vae "$H3_VIDEO_VAE_NAME"
+  [[ -z "$tmp" ]] || rm -f "$tmp"
 }
 
 install_h3_workflow_templates() {
@@ -809,7 +850,7 @@ patch_h3_workflow_model_names() {
   local workflow_dir="$COMFY_DIR/custom_nodes/ComfyUI-H3-Worker/example_workflows"
   local summary
   [[ -d "$workflow_dir" ]] || return 0
-  if ! summary="$($COMFY_PYTHON - "$workflow_dir" <<'PY'
+  if ! summary="$($COMFY_PYTHON - "$workflow_dir" "$H3_VIDEO_VAE_NAME" <<'PY'
 import json
 import os
 import sys
@@ -817,7 +858,10 @@ import tempfile
 from pathlib import Path
 
 root = Path(sys.argv[1])
+video_vae_name = sys.argv[2]
 model_names = {
+    "minimax_h3_video_vae_fp16.safetensors": video_vae_name,
+    "minimax_h3_video_vae_int8_convrot.safetensors": video_vae_name,
     "minimax_h3_fl2va_int8_convrot.safetensors": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
     "minimax_h3_ref2va_int8_convrot.safetensors": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
     "qwen3vl_32b_minimax_h3_int8_convrot.safetensors": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
@@ -834,7 +878,7 @@ def rewrite(value):
         return value
     if isinstance(value, list):
         return [rewrite(child) for child in value]
-    if isinstance(value, str) and value in model_names:
+    if isinstance(value, str) and value in model_names and value != model_names[value]:
         replaced_values += 1
         return model_names[value]
     return value
@@ -922,8 +966,17 @@ diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
 diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors
 text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors
 vae/minimax_h3_video_vae_fp16.safetensors
+vae/minimax_h3_video_vae_int8_convrot.safetensors
 vae/minimax_h3_audio_vae_fp32.safetensors
 EOF
+}
+
+model_revision() {
+  if [[ "$1" == "vae/minimax_h3_video_vae_int8_convrot.safetensors" ]]; then
+    printf '%s\n' "$H3_INT8_VIDEO_VAE_REV"
+  else
+    printf '%s\n' "$H3_MODEL_REV"
+  fi
 }
 
 model_min_bytes() {
@@ -932,6 +985,7 @@ model_min_bytes() {
     diffusion_models/*) printf '%s\n' 10000000000 ;;
     text_encoders/*) printf '%s\n' 8000000000 ;;
     vae/minimax_h3_video_vae_fp16.safetensors) printf '%s\n' 4000000000 ;;
+    vae/minimax_h3_video_vae_int8_convrot.safetensors) printf '%s\n' 2000000000 ;;
     vae/minimax_h3_audio_vae_fp32.safetensors) printf '%s\n' 500000000 ;;
     vae/*) printf '%s\n' 100000000 ;;
     *) printf '%s\n' 1000000 ;;
@@ -945,6 +999,7 @@ model_expected_bytes() {
     diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors) printf '%s\n' 20970379616 ;;
     text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors) printf '%s\n' 15687142551 ;;
     vae/minimax_h3_video_vae_fp16.safetensors) printf '%s\n' 5207808496 ;;
+    vae/minimax_h3_video_vae_int8_convrot.safetensors) printf '%s\n' 2811065184 ;;
     vae/minimax_h3_audio_vae_fp32.safetensors) printf '%s\n' 605254808 ;;
     *) return 1 ;;
   esac
@@ -964,6 +1019,9 @@ model_expected_sha256() {
       ;;
     vae/minimax_h3_video_vae_fp16.safetensors)
       printf '%s\n' 7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522
+      ;;
+    vae/minimax_h3_video_vae_int8_convrot.safetensors)
+      printf '%s\n' 52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e
       ;;
     vae/minimax_h3_audio_vae_fp32.safetensors)
       printf '%s\n' 8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48
@@ -1043,10 +1101,11 @@ get_missing_model_count() {
 }
 
 download_model_file() {
-  local repo_path="$1" destination expected_bytes expected_sha
+  local repo_path="$1" destination expected_bytes expected_sha revision
   destination="$COMFY_DIR/models/$repo_path"
   expected_bytes="$(model_expected_bytes "$repo_path")"
   expected_sha="$(model_expected_sha256 "$repo_path")"
+  revision="$(model_revision "$repo_path")"
   mkdir -p "$(dirname "$destination")"
 
   if [[ "${H3_FORCE_REDOWNLOAD:-0}" != "1" ]] && model_file_matches_release "$destination" "$repo_path"; then
@@ -1063,8 +1122,8 @@ download_model_file() {
   local tmp_dir tmp_file
   tmp_dir="$(mktemp -d "$(dirname "$destination")/.h3-download.XXXXXX")"
   tmp_file="$tmp_dir/model.part"
-  log_info "Downloading pinned model $repo_path @ $H3_MODEL_REV"
-  if ! "$COMFY_PYTHON" - "$H3_MODEL_REPO" "$H3_MODEL_REV" "$repo_path" "$tmp_file" <<'PY'
+  log_info "Downloading pinned model $repo_path @ $revision"
+  if ! "$COMFY_PYTHON" - "$H3_MODEL_REPO" "$revision" "$repo_path" "$tmp_file" <<'PY'
 import os
 import sys
 from huggingface_hub import hf_hub_download
@@ -1081,7 +1140,7 @@ os.replace(source, destination)
 PY
   then
     rm -rf "$tmp_dir"
-    die "Model download failed: $repo_path @ $H3_MODEL_REV"
+    die "Model download failed: $repo_path @ $revision"
   fi
 
   local actual_bytes actual_sha
@@ -1471,6 +1530,7 @@ expected = {
     },
     "VAELoader": {
         "minimax_h3_video_vae_fp16.safetensors",
+        "minimax_h3_video_vae_int8_convrot.safetensors",
         "minimax_h3_audio_vae_fp32.safetensors",
     },
 }
@@ -1548,6 +1608,14 @@ run_health_checks() {
   else
     die "Supervisor is RUNNING but http://127.0.0.1:$COMFY_PORT did not respond."
   fi
+  "$COMFY_PYTHON" - "http://127.0.0.1:$COMFY_PORT/h3/runtime_status" <<'PY'
+import json, sys, urllib.request
+with urllib.request.urlopen(sys.argv[1], timeout=10) as response:
+    status = json.load(response)
+if status.get("layout_guard") != "v1":
+    raise SystemExit("Common Sage layout guard is unavailable")
+print("[OK] Attention runtime: " + json.dumps(status, sort_keys=True))
+PY
   if validate_comfyui_model_catalog; then
     log_ok "ComfyUI model catalog contains all required H3 models"
   else
@@ -1603,7 +1671,7 @@ main() {
     *) usage >&2; die "Unknown argument: $1" ;;
   esac
   log_info "MiniMax H3 bootstrap v$H3_BOOTSTRAP_VERSION"
-  log_info "This installs/updates ComfyUI, Manager, KJNodes, and five public H3 model files."
+  log_info "This installs/updates ComfyUI, Manager, KJNodes, and six public H3 model files."
   detect_environment
   validate_prerequisites
   stop_comfyui
@@ -1613,6 +1681,7 @@ main() {
   install_custom_nodes
   install_sageattention
   validate_acceleration_configuration
+  install_attention_runtime
   install_h3_workflow_templates
   download_h3_models
   patch_h3_workflow_model_names
