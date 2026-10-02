@@ -1,0 +1,114 @@
+def _execute_h3_independent_first(
+    clip, vae, audio_vae, prompt: str, width: int, height: int, length: int,
+    ref_image_size: str, ref_images: dict[str, torch.Tensor],
+    ref_videos: dict[str, torch.Tensor], ref_video_audios: dict[str, dict[str, Any]],
+    ref_audios: dict[str, dict[str, Any]],
+) -> tuple[Any, Any]:
+    """H3 Ref2VA with standalone Audio ordinals before paired video soundtracks.
+
+    The official node presents video soundtracks before standalone audio.  The
+    director intentionally presents independent audio first so the visible bin
+    is stable as <Audio 1>, <Audio 2>, ... regardless of timeline video refs.
+    """
+
+    latent, frame_count = h3_nodes._empty_av_latent(width, height, length)
+    ref_items: list[dict[str, Any]] = []
+    ref_blocks: list[dict[str, Any]] = []
+
+    def encode_reference_audio(audio):
+        return _reference_cache.get_or_compute(
+            "audio_vae", audio_vae, (audio,),
+            {"target_sample_rate": getattr(audio_vae, "audio_sample_rate", 32000)},
+            lambda: h3_nodes._encode_ref_audio(audio_vae, audio),
+        )
+
+    for image in (ref_images or {}).values():
+        if image is None:
+            continue
+        image_height, image_width = image.shape[1], image.shape[2]
+        if ref_image_size == "match":
+            scale = min(1.0, math.sqrt((width * height) / (image_width * image_height)))
+        else:
+            scale = min(1.0, h3_nodes.REF_IMAGE_SHORT_EDGE / min(image_width, image_height))
+        target_width = max(
+            h3_nodes.CANVAS_MULTIPLE,
+            round(image_width * scale / h3_nodes.CANVAS_MULTIPLE) * h3_nodes.CANVAS_MULTIPLE,
+        )
+        target_height = max(
+            h3_nodes.CANVAS_MULTIPLE,
+            round(image_height * scale / h3_nodes.CANVAS_MULTIPLE) * h3_nodes.CANVAS_MULTIPLE,
+        )
+        resized = h3_nodes._resize(image[:1], target_width, target_height, "disabled")
+        encoded = _reference_cache.get_or_compute(
+            "image_vae", vae, (resized,), (), lambda: vae.encode(resized)
+        )
+        ref_items.append({"type": "image", "data": resized})
+        ref_blocks.append({
+            "kind": "image", "latent_h": target_height // 16,
+            "latent_w": target_width // 16, "latent": encoded,
+        })
+
+    # Standalone references own Audio 1..N.
+    for audio in (ref_audios or {}).values():
+        if audio is None:
+            continue
+        audio_latent, ref_audio_t = encode_reference_audio(audio)
+        ref_items.append({"type": "audio"})
+        ref_blocks.append({"kind": "audio", "ref_audio_t": ref_audio_t, "audio_latent": audio_latent})
+
+    ref_video_audios = ref_video_audios or {}
+    for name, video_frames in (ref_videos or {}).items():
+        if video_frames is None:
+            continue
+        soundtrack = ref_video_audios.get("ref_video_audio_" + name.rsplit("_", 1)[-1])
+        video_height, video_width = video_frames.shape[1], video_frames.shape[2]
+        canvas_width, canvas_height = h3_nodes.adapt_canvas(video_width, video_height)
+        if video_width * video_height < canvas_width * canvas_height:
+            canvas_width = max(
+                h3_nodes.CANVAS_MULTIPLE,
+                round(video_width / h3_nodes.CANVAS_MULTIPLE) * h3_nodes.CANVAS_MULTIPLE,
+            )
+            canvas_height = max(
+                h3_nodes.CANVAS_MULTIPLE,
+                round(video_height / h3_nodes.CANVAS_MULTIPLE) * h3_nodes.CANVAS_MULTIPLE,
+            )
+        frames = h3_nodes._resize(video_frames, canvas_width, canvas_height, "disabled")
+        if frames.shape[0] > frame_count:
+            frames = frames[:frame_count]
+        frame_total = frames.shape[0]
+        if frame_total < 5:
+            raise ValueError("MiniMax H3 reference videos need at least 5 frames (~0.2s at 24 fps)")
+        while frame_total % 17 != 5:
+            frame_total -= 1
+        frames = frames[:frame_total]
+        video_latent = _reference_cache.get_or_compute(
+            "video_vae", vae, (frames,), (), lambda: vae.encode(frames)
+        )
+        audio_latent, ref_audio_t = (None, 0)
+        if soundtrack is not None:
+            audio_latent, ref_audio_t = encode_reference_audio(soundtrack)
+            ref_items.append({"type": "audio"})
+        sample_indices = list(range(0, frames.shape[0], h3_nodes.FPS // 2))
+        qwen_frames = frames[sample_indices]
+        ref_items.append({
+            "type": "video", "data": qwen_frames,
+            "timestamps": [index / 2.0 for index in range(len(sample_indices))],
+        })
+        ref_blocks.append({
+            "kind": "video_audio" if ref_audio_t else "video",
+            "latent_t": video_latent.shape[2], "latent_h": canvas_height // 16,
+            "latent_w": canvas_width // 16, "ref_audio_t": ref_audio_t,
+            "latent": video_latent, "audio_latent": audio_latent,
+        })
+
+    conditioning = _reference_cache.get_or_compute(
+        "clip_conditioning", clip, (prompt, ref_items), (),
+        lambda: clip.encode_from_tokens_scheduled(
+            clip.tokenize(prompt, minimax_ref_items=ref_items)
+        ),
+    )
+    if ref_blocks:
+        conditioning = node_helpers.conditioning_set_values(
+            conditioning, {"minimax_refs": ref_blocks}
+        )
+    return conditioning, latent

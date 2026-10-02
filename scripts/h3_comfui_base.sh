@@ -8,6 +8,11 @@ H3_MODEL_REPO="${H3_MODEL_REPO:-Comfy-Org/MiniMax-H3}"
 H3_MODEL_REV="${H3_MODEL_REV:-0bd506d2e895983a9663037febda27aa3948cf48}"
 H3_INT8_VIDEO_VAE_REV="e5eb578a89295337b8ff433a035929ce0279e0b6"
 H3_VIDEO_VAE_VARIANT="${H3_VIDEO_VAE_VARIANT:-int8}"
+H3_PREVIEW_METHOD="${H3_PREVIEW_METHOD:-none}"
+case "$H3_PREVIEW_METHOD" in
+  none|taesd|auto|latent2rgb) ;;
+  *) printf '[ERROR] Unsupported H3_PREVIEW_METHOD.\n' >&2; return 1 2>/dev/null || exit 1 ;;
+esac
 case "$H3_VIDEO_VAE_VARIANT" in
   fp16) H3_VIDEO_VAE_NAME="minimax_h3_video_vae_fp16.safetensors" ;;
   int8) H3_VIDEO_VAE_NAME="minimax_h3_video_vae_int8_convrot.safetensors" ;;
@@ -1173,7 +1178,7 @@ download_h3_models() {
 expected_runtime_flags() {
   local vram_mb="$1"
   if (( vram_mb >= 80000 )); then printf '%s\n' '--highvram'; fi
-  printf '%s\n' '--listen' '0.0.0.0' '--enable-cors-header' '*' '--reserve-vram' '2' '--preview-method' 'none'
+  printf '%s\n' '--listen' '0.0.0.0' '--enable-cors-header' '*' '--reserve-vram' '2' '--preview-method' "$H3_PREVIEW_METHOD"
   if [[ "${H3_USE_SAGE_GLOBAL:-0}" == "1" ]]; then
     printf '%s\n' '--use-sage-attention'
   fi
@@ -1210,9 +1215,10 @@ patch_comfy_command_file() {
   fi
   local backup="$target.h3-backup-$(date +%Y%m%d-%H%M%S)"
   cp -a "$target" "$backup"
-  python3 - "$target" "$vram_mb" "$use_sage" <<'PY'
+  python3 - "$target" "$vram_mb" "$use_sage" "$H3_PREVIEW_METHOD" <<'PY'
 import re, sys
 path, vram, use_sage = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1"
+preview_method = sys.argv[4]
 lines = open(path, encoding='utf-8').read().splitlines(keepends=True)
 portal_guard = re.compile(r'^\s*(?:\.|source)\s+.*exit_portal\.sh.*ComfyUI.*$')
 for index, raw in enumerate(lines):
@@ -1232,11 +1238,17 @@ for i, raw in enumerate(lines):
     expected = []
     if vram >= 80000:
         expected.append((r'(?<!\S)--highvram(?!\S)', '--highvram'))
+    original_value = value
+    preview_flag = re.compile(r'(?<!\S)--preview-method(?:\s+|=)[A-Za-z0-9_-]+')
+    preview = preview_flag.search(value)
+    if preview is not None:
+        value = preview_flag.sub(lambda match: '--preview-method ' + preview_method if match.start() == preview.start() else '', value)
+    preview_changed = value != original_value
     expected.extend([
         (r'(?<!\S)--listen(?:\s+0\.0\.0\.0)?(?!\S)', '--listen 0.0.0.0'),
         (r'(?<!\S)--enable-cors-header(?:\s+[^\s]+)?(?!\S)', "--enable-cors-header '*'"),
         (r'(?<!\S)--reserve-vram(?:\s+2|=2)(?!\S)', '--reserve-vram 2'),
-        (r'(?<!\S)--preview-method(?:\s+none|=none)(?!\S)', '--preview-method none'),
+        (r'(?<!\S)--preview-method(?:\s+' + re.escape(preview_method) + '|=' + re.escape(preview_method) + r')(?!\S)', '--preview-method ' + preview_method),
     ])
     if use_sage:
         expected.append((r'(?<!\S)--use-sage-attention(?!\S)', '--use-sage-attention'))
@@ -1260,6 +1272,7 @@ for i, raw in enumerate(lines):
                 value = re.sub(pattern, '', value)
             value = re.sub(r'(?<!\\)\\\s*$', r'\\', value)
             body = assignment_match.group('body')
+            body = re.sub(r'(?<!\S)--preview-method(?:\s+|=)[A-Za-z0-9_-]+', '', body)
             for pattern, _ in expected:
                 body = re.sub(pattern, '', body)
             body = re.sub(r'\s+', ' ', body).strip()
@@ -1312,7 +1325,7 @@ for i, raw in enumerate(lines):
         else:
             value += ' ' + addition
         lines[i] = value + newline
-    elif normalized_continuation:
+    elif normalized_continuation or preview_changed:
         lines[i] = value + newline
     break
 else:
@@ -1345,9 +1358,10 @@ patch_supervisor_config() {
   local backup
   backup="$config.h3-backup-$(date +%Y%m%d-%H%M%S)"
   cp -a "$config" "$backup"
-  python3 - "$config" "$simple" "$vram_mb" "$use_sage" <<'PY'
+  python3 - "$config" "$simple" "$vram_mb" "$use_sage" "$H3_PREVIEW_METHOD" <<'PY'
 import re, shlex, sys
 path, service, vram, use_sage = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4] == "1"
+preview_method = sys.argv[5]
 lines = open(path, encoding="utf-8").read().splitlines(keepends=True)
 section = re.compile(r"^\s*\[program:" + re.escape(service) + r"\]\s*$")
 next_section = re.compile(r"^\s*\[.+\]\s*$")
@@ -1372,8 +1386,16 @@ for i, raw in enumerate(lines):
             wanted += ["--enable-cors-header", "*"]
         if not re.search(r"(^|\s)--reserve-vram(?:=|\s+)", value):
             wanted += ["--reserve-vram", "2"]
-        if not re.search(r"(^|\s)--preview-method(?:=|\s+)", value):
-            wanted += ["--preview-method", "none"]
+        preview_flag = re.compile(r"(?<!\S)--preview-method(?:=|\s+)[A-Za-z0-9_-]+")
+        preview = preview_flag.search(value)
+        if preview is not None:
+            normalized = preview_flag.sub(lambda match: "--preview-method " + preview_method if match.start() == preview.start() else "", value)
+            if normalized != value:
+                value = normalized
+                lines[i] = prefix + "=" + value + newline
+                changed = True
+        elif preview is None:
+            wanted += ["--preview-method", preview_method]
         if use_sage and not re.search(r"(^|\s)--use-sage-attention(?=\s|$)", value):
             wanted.append("--use-sage-attention")
         if wanted:
