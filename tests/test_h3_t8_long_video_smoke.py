@@ -366,6 +366,36 @@ def test_validate_manifest_requires_124_plus_68_frames():
         raise AssertionError("69-frame final segment must be rejected")
 
 
+def test_capture_first_evidence_accepts_pinned_eav_audit(tmp_path):
+    module = load_module()
+    candidate = tmp_path / "candidates" / "segment_00000" / "candidate"
+    candidate.mkdir(parents=True)
+    video = tmp_path / "first.mp4"
+    context = tmp_path / "first.context.safetensors"
+    video.write_bytes(b"video")
+    context.write_bytes(b"context")
+    (candidate / "candidate.json").write_text("{}", encoding="utf-8")
+    audit = {
+        "prompt_relay": {"status": "applied_exp"},
+        "enhance_a_video_audit": {"status": "apply_exp_long_video_segment_verified"},
+    }
+    (candidate / "effects_audit.json").write_text(json.dumps(audit), encoding="utf-8")
+    entry = {
+        "index": 0, "fps": 24, "width": 512, "height": 288,
+        "frame_count": 124, "candidate_id": "candidate",
+        "video_path": video.name, "context_path": context.name,
+        "video_sha256": module.sha256_file(video),
+        "context_sha256": module.sha256_file(context),
+    }
+    manifest = {
+        "chain_id": "chain", "schema": 2, "revision": 1,
+        "format": "minimax_h3_t8_accepted_manifest", "segments": [entry],
+    }
+    frozen = module.capture_first_evidence(tmp_path, manifest)
+    assert frozen["entry"] == entry
+    assert frozen["files"]["audit"]["sha256"] == module.sha256_file(candidate / "effects_audit.json")
+
+
 def test_validate_final_report_requires_relay_and_eav_on_both_segments(tmp_path):
     module = load_module()
     report = {
@@ -379,16 +409,26 @@ def test_validate_final_report_requires_relay_and_eav_on_both_segments(tmp_path)
         "segment_audits": [
             {
                 "prompt_relay": {"status": "applied_exp"},
-                "enhance_a_video_audit": {"status": "verified"},
+                "enhance_a_video_audit": {"status": "apply_exp_long_video_segment_verified"},
             },
             {
                 "prompt_relay": {"status": "applied_exp"},
-                "enhance_a_video_audit": {"status": "verified"},
+                "enhance_a_video_audit": {"status": "apply_exp_long_video_segment_verified"},
             },
         ],
     }
     (tmp_path / module.REPORT_NAME).write_text(json.dumps(report), encoding="utf-8")
     assert module.validate_final_report(tmp_path) == report
+
+    for status in ("verified", "report_only_long_video_segment_verified", "failed", None):
+        report["segment_audits"][1]["enhance_a_video_audit"]["status"] = status
+        (tmp_path / module.REPORT_NAME).write_text(json.dumps(report), encoding="utf-8")
+        try:
+            module.validate_final_report(tmp_path)
+        except RuntimeError as exc:
+            assert "Segment 1 EAV audit was not verified" in str(exc)
+        else:
+            raise AssertionError(f"non-apply EAV status must fail: {status}")
 
 
 def test_add_comfyui_view_exposes_relative_output_receipt(tmp_path):

@@ -42,6 +42,7 @@ STATE_FOLDER = "minimax_h3_t8_long_video"
 STATE_NAME = "in_node_loop_effects_state.json"
 MANIFEST_NAME = "manifest.json"
 REPORT_NAME = "last_execution_report.json"
+EAV_VERIFIED_STATUS = "apply_exp_long_video_segment_verified"
 UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
@@ -658,7 +659,7 @@ def capture_first_evidence(root: Path, manifest: dict[str, Any]) -> dict[str, An
     audit = read_json(_inside(root, relative_files["audit"]))
     if (audit.get("prompt_relay") or {}).get("status") != "applied_exp":
         raise RuntimeError("First accepted segment did not apply Prompt Relay")
-    if (audit.get("enhance_a_video_audit") or {}).get("status") != "verified":
+    if (audit.get("enhance_a_video_audit") or {}).get("status") != EAV_VERIFIED_STATUS:
         raise RuntimeError("First accepted segment EAV audit is not verified")
     return {"entry": entry, "files": identities}
 
@@ -696,7 +697,7 @@ def validate_final_report(root: Path) -> dict[str, Any]:
     for index, audit in enumerate(audits):
         if (audit.get("prompt_relay") or {}).get("status") != "applied_exp":
             raise RuntimeError(f"Segment {index} Prompt Relay was not applied")
-        if (audit.get("enhance_a_video_audit") or {}).get("status") != "verified":
+        if (audit.get("enhance_a_video_audit") or {}).get("status") != EAV_VERIFIED_STATUS:
             raise RuntimeError(f"Segment {index} EAV audit was not verified")
     return report
 
@@ -1009,7 +1010,7 @@ def run_smoke(
             for item in report["segment_audits"]
         ),
         "eav_verified_all_segments": all(
-            (item.get("enhance_a_video_audit") or {}).get("status") == "verified"
+            (item.get("enhance_a_video_audit") or {}).get("status") == EAV_VERIFIED_STATUS
             for item in report["segment_audits"]
         ),
         "media": media,
