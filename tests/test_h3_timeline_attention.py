@@ -47,7 +47,7 @@ def sampler_class(tmp_path):
 
 
 @pytest.mark.parametrize("stage", ["full", "preview", "finalize"])
-def test_director_clones_model_and_selects_sdpa_for_every_stage(tmp_path, stage):
+def test_director_clones_model_and_selects_safe_attention_for_every_stage(tmp_path, stage):
     cls = sampler_class(tmp_path)
     original = SimpleNamespace(model_options={"transformer_options": {"other_option": 17}})
     original.clone = lambda: SimpleNamespace(model_options=copy.deepcopy(original.model_options))
@@ -60,13 +60,48 @@ def test_director_clones_model_and_selects_sdpa_for_every_stage(tmp_path, stage)
     assert original.model_options == {"transformer_options": {"other_option": 17}}
 
 
-def test_director_override_bypasses_sage_and_preserves_attention_arguments(tmp_path, monkeypatch):
+class TensorLayout:
+    def __init__(self, length, *, packed=False):
+        self.shape = (1, 56, length, 128)
+        self.strides = (56 * length * 128, 128, 3 * 56 * 128, 1) if packed else (56 * length * 128, length * 128, 128, 1)
+
+    def numel(self):
+        return 56 * self.shape[2] * 128
+
+    def contiguous(self):
+        return TensorLayout(self.shape[2])
+
+    def last_offset(self):
+        return sum((size - 1) * stride for size, stride in zip(self.shape, self.strides))
+
+
+def test_director_restores_configured_attention_with_safe_contiguous_inputs(tmp_path, monkeypatch):
+    cls = sampler_class(tmp_path)
+    def forbidden_sdpa(*args, **kwargs):
+        raise AssertionError("A safe layout must retain the configured accelerated backend")
+    monkeypatch.setitem(sys.modules, "comfy.ldm.modules.attention", SimpleNamespace(attention_pytorch=SimpleNamespace(__wrapped__=forbidden_sdpa)))
+    tensors = [TensorLayout(120000, packed=True) for _ in range(3)]
+    assert tensors[0].last_offset() >= 2**31
+    calls = []
+    def sage(q, k, v, *args, **kwargs):
+        assert all(t.last_offset() < 2**31 for t in (q, k, v))
+        calls.append(((q, k, v, *args), kwargs))
+        return "sage-result"
+    result = cls._attention_override(sage, *tensors, 56, mask=None, skip_reshape=True, transformer_options={"kept": 1})
+    assert result == "sage-result"
+    assert calls[0][0][3:] == (56,)
+    assert calls[0][1] == {"mask": None, "skip_reshape": True, "transformer_options": {"kept": 1}}
+    assert all(t.last_offset() >= 2**31 for t in tensors)
+
+
+def test_director_uses_sdpa_only_for_layouts_exceeding_int32_range(tmp_path, monkeypatch):
     cls = sampler_class(tmp_path)
     calls = []
     attention = SimpleNamespace(__wrapped__=lambda *args, **kwargs: calls.append((args, kwargs)) or "sdpa-result")
     monkeypatch.setitem(sys.modules, "comfy.ldm.modules.attention", SimpleNamespace(attention_pytorch=attention))
     def sage(*args, **kwargs):
         raise AssertionError("The failing Sage kernel must not be entered")
-    result = cls._attention_override(sage, "q", "k", "v", 32, mask=None, skip_reshape=True, transformer_options={"kept": 1})
+    tensors = [TensorLayout(300000) for _ in range(3)]
+    result = cls._attention_override(sage, *tensors, 56, mask=None, skip_reshape=True, transformer_options={"kept": 1})
     assert result == "sdpa-result"
-    assert calls == [(("q", "k", "v", 32), {"mask": None, "skip_reshape": True, "transformer_options": {"kept": 1}})]
+    assert calls == [((*tensors, 56), {"mask": None, "skip_reshape": True, "transformer_options": {"kept": 1}})]

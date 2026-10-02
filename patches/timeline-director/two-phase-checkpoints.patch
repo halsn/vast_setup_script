@@ -39,7 +39,7 @@ index 34d7b55..48b0446 100644
      "MiniMaxH3FiniteOutputTrim": "MiniMax H3 Finite Output Trim (Internal)",
      "MiniMaxH3FiniteLatentContinuation": "MiniMax H3 Finite Latent Continuation (Internal)",
 diff --git a/minimax_h3_finite_segments.py b/minimax_h3_finite_segments.py
-index 11b0e0c..cc98ad0 100644
+index 11b0e0c..c3b41be 100644
 --- a/minimax_h3_finite_segments.py
 +++ b/minimax_h3_finite_segments.py
 @@ -22,6 +22,12 @@ from .drift_control_av import (
@@ -55,20 +55,22 @@ index 11b0e0c..cc98ad0 100644
  from .minimax_h3_timeline_director import (
      TimelinePlan,
      _require_timeline_plan,
-@@ -898,6 +904,12 @@ class MiniMaxH3FiniteOutputTrim(io.ComfyNode):
+@@ -898,6 +904,14 @@ class MiniMaxH3FiniteOutputTrim(io.ComfyNode):
  class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
      """Expand a finite plan into a standard acyclic sampling graph."""
  
 +    @staticmethod
-+    def _attention_override(func, *args, **kwargs):
-+        # Sage can fault on packed H3 reference-video tokens; select SDPA before launch.
-+        from comfy.ldm.modules.attention import attention_pytorch
-+        return attention_pytorch.__wrapped__(*args, **kwargs)
++    def _attention_override(func, q, k, v, *args, **kwargs):
++        # Old Sage Triton kernels use int32 offsets on fused, strided H3 QKV views.
++        if any(tensor.numel() >= 2**31 for tensor in (q, k, v)):
++            from comfy.ldm.modules.attention import attention_pytorch
++            return attention_pytorch.__wrapped__(q, k, v, *args, **kwargs)
++        return func(q.contiguous(), k.contiguous(), v.contiguous(), *args, **kwargs)
 +
      @classmethod
      def define_schema(cls):
          return io.Schema(
-@@ -920,6 +932,9 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+@@ -920,6 +934,9 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
                  io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True),
                  io.Boolean.Input("continue_audio_latent", display_name="Continue Audio Latent", default=True),
                  io.Combo.Input("ref_image_size", options=["match", "max"], default="match"),
@@ -78,7 +80,7 @@ index 11b0e0c..cc98ad0 100644
              ],
              outputs=[
                  io.Latent.Output(display_name="Last Sampled Latent"),
-@@ -932,9 +947,23 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+@@ -932,9 +949,23 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
      @classmethod
      def execute(
          cls, model, clip, vae, audio_vae, finite_plan, sampler, sigmas, seed,
@@ -103,7 +105,7 @@ index 11b0e0c..cc98ad0 100644
          graph = GraphBuilder()
          previous_latent = None
          previous_images = None
-@@ -1007,6 +1036,10 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+@@ -1007,6 +1038,10 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
                      negative=continuation.out(0), vae=vae,
                      latent_image=sampling_latent, sampler=sampler, sigmas=sigmas,
                      seed=int(seed), cfg=1.0, **selflift_settings,
@@ -114,7 +116,7 @@ index 11b0e0c..cc98ad0 100644
                  )
              else:
                  noise = graph.node("RandomNoise", id=f"noise_{number}", noise_seed=int(seed))
-@@ -1054,6 +1087,14 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+@@ -1054,6 +1089,14 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
              previous_images = images.out(0)
              last_sampled = sampled.out(0)
  
@@ -129,7 +131,7 @@ index 11b0e0c..cc98ad0 100644
          target_output_frames = int(finite.get("target_output_frames") or 0)
          if target_output_frames > 0:
              output_trim = graph.node(
-@@ -1132,3 +1173,32 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
+@@ -1132,3 +1175,32 @@ class MiniMaxH3FiniteSegmentSampler(io.ComfyNode):
          return io.NodeOutput(
              last_sampled, merged_images, merged_audio, status, expand=graph.finalize()
          )
