@@ -191,6 +191,6 @@ def test_timeline_patch_upgrade_accepts_only_the_audited_previous_diff(tmp_path,
 
 def test_setup_fetches_patch_from_its_resolved_support_revision():
     text = (ROOT / "scripts" / "setupp_h3_studio.sh").read_text(encoding="utf-8")
-    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-8d0356695c353a49953e009df5ffa2a952662835}"' in text
+    assert 'H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-d24ffe2c9cd2f0725c2e5e8ba86a12b1025106b8}"' in text
     assert "$H3_SETUP_SUPPORT_REV/patches/timeline-director/two-phase-checkpoints.patch" in text
     assert "raw.githubusercontent.com/halsn/vast_setup_script/main/patches" not in text
