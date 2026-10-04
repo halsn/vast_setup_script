@@ -658,6 +658,8 @@ update_python_dependencies() {
   local constraints_file="/tmp/h3-comfyui-torch-constraints.txt"
   "$COMFY_PYTHON" - > "$constraints_file" <<'PY'
 import importlib.metadata
+# Tokenizers requires Hub <2; keep this constraint in both resolver runs.
+print("huggingface-hub>=0.34,<2")
 for package in ("torch", "torchvision", "torchaudio"):
     try:
         print(f"{package}=={importlib.metadata.version(package)}")
@@ -667,7 +669,7 @@ PY
   grep -Ev '^(torch|torchvision|torchaudio)([<=>].*)?$' \
     "$COMFY_DIR/requirements.txt" > "$requirements_file"
   "$COMFY_PYTHON" -m pip install -U -c "$constraints_file" -r "$requirements_file"
-  "$COMFY_PYTHON" -m pip install -U -c "$constraints_file" huggingface_hub hf_xet
+  "$COMFY_PYTHON" -m pip install -U -c "$constraints_file" 'huggingface_hub>=0.34,<2' hf_xet
   rm -f "$requirements_file" "$constraints_file"
 }
 
@@ -750,15 +752,25 @@ install_sageattention() {
     SAGE_STATUS="$(detect_sageattention)"
     return 0
   fi
-  local version="$H3_SAGE_VERSION" installed
+  local version="${H3_SAGE_VERSION:-2.2.0}" installed
   installed="$("$COMFY_PYTHON" -c 'import importlib.metadata; print(importlib.metadata.version("sageattention"))' 2>/dev/null || true)"
   if [[ "$installed" != "$version" ]]; then
     log_info "Installing SageAttention $version (current: ${installed:-missing}) without changing Torch/CUDA."
-    "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation "sageattention==${version}" || {
-      SAGE_STATUS="not-installed-no-verified-wheel"
-      [[ "${H3_SAGE_REQUIRED:-0}" != "1" ]] || die "SageAttention installation failed. Check CUDA_HOME, nvcc, and the Torch/CUDA match."
-      return 0
-    }
+    if ! "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation "sageattention==${version}"; then
+      local source=""
+      # Official v2.2.0 release, pinned instead of compiling a moving main branch.
+      # Never use this source for an explicitly requested different version.
+      if [[ "$version" == "2.2.0" ]]; then
+        source="git+https://github.com/thu-ml/SageAttention.git@eb615cf6cf4d221338033340ee2de1c37fbdba4a"
+        log_warn "SageAttention $version package installation failed; compiling its pinned official source (requires nvcc and matching CUDA)."
+      fi
+      if [[ -z "$source" ]] || ! MAX_JOBS="${MAX_JOBS:-4}" "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation "$source"; then
+        SAGE_STATUS="not-installed-no-verified-wheel"
+        [[ "${H3_SAGE_REQUIRED:-0}" != "1" ]] || die "SageAttention installation failed (package/source). Check CUDA_HOME, nvcc, and the Torch/CUDA match."
+        log_warn "SageAttention installation failed; continuing without verified Sage acceleration."
+        return 0
+      fi
+    fi
     installed="$("$COMFY_PYTHON" -c 'import importlib.metadata; print(importlib.metadata.version("sageattention"))' 2>/dev/null || true)"
   fi
   if [[ "$installed" == "$version" && "$(detect_sageattention)" == "installed" ]]; then
