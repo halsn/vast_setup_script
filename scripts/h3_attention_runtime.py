@@ -8,17 +8,36 @@ import textwrap
 
 
 MARKER = "# H3_SAGE_LAYOUT_GUARD_V1"
+OOM_MARKER = "# H3_SAGE_OOM_GUARD_V1"
+OOM_HANDLER = '''        # H3_SAGE_OOM_GUARD_V1
+        message = str(e).lower()
+        if (any(cls.__name__ == "OutOfMemoryError" for cls in type(e).__mro__)
+                or any(token in message for token in (
+                    "out of memory", "cuda error: memory allocation", "cudaerrormemoryallocation"))):
+            from comfy.model_management import OOM_EXCEPTION
+            record_attention("oom", str(e))
+            if isinstance(e, OOM_EXCEPTION):
+                raise
+            raise OOM_EXCEPTION(
+                "H3 SageAttention out of memory; lower output/reference resolution or reference frames. "
+                "No attention fallback was attempted. Original error: " + str(e)
+            ) from e
+'''
 VIDEO_VAES = ("minimax_h3_video_vae_int8_convrot.safetensors", "minimax_h3_video_vae_fp16.safetensors")
 STATUS_SOURCE = '''"""Observed attention calls; configured attention is reported separately."""
 import importlib.metadata
 import time
 
 _status = {"last_backend": None, "last_call_at": None, "fallback_count": 0,
-           "last_fallback_reason": None, "layout_guard": "v1"}
+           "last_fallback_reason": None, "layout_guard": "v1", "oom_guard": "v1",
+           "oom_count": 0, "last_oom_reason": None}
 
 def record_attention(backend, reason):
     _status.update(last_backend=backend, last_call_at=time.time())
-    if reason:
+    if backend == "oom":
+        _status["oom_count"] += 1
+        _status["last_oom_reason"] = str(reason)
+    elif reason and backend == "pytorch":
         _status["fallback_count"] += 1
         _status["last_fallback_reason"] = str(reason)
 
@@ -64,7 +83,7 @@ def patch_attention_source(source: str) -> str:
     if MARKER in source:
         if source.count(MARKER) != 1 or "q, k, v = (tensor.contiguous() for tensor in (q, k, v))" not in source:
             raise ValueError("Modified managed Sage guard")
-        return source
+        return patch_oom_handler(source, function)
     calls = [n for n in ast.walk(function) if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Name) and n.func.id == "sageattn"]
     tries = [n for n in ast.walk(function) if isinstance(n, ast.Try)
@@ -106,6 +125,34 @@ def patch_attention_source(source: str) -> str:
                 insertions[node.lineno] = indent + 'record_attention("pytorch", "precision or mask requires PyTorch")\n'
     lines = source.splitlines(keepends=True)
     result = "".join(insertions.get(i, "") + line for i, line in enumerate(lines, 1))
+    ast.parse(result)
+    patched_function = next(n for n in ast.parse(result).body
+                            if isinstance(n, ast.FunctionDef) and n.name == "attention_sage")
+    return patch_oom_handler(result, patched_function)
+
+
+def patch_oom_handler(source: str, function: ast.FunctionDef) -> str:
+    """Upgrade only the existing managed Sage exception handler, never retry OOM."""
+    handlers = [node for node in ast.walk(function)
+                if isinstance(node, ast.ExceptHandler) and node.name == "e"]
+    if len(handlers) != 1:
+        raise ValueError("Unsupported ComfyUI Sage exception structure")
+    handler = handlers[0]
+    lines = source.splitlines(keepends=True)
+    body = "".join(lines[handler.lineno:handler.end_lineno])
+    if OOM_MARKER in source:
+        if source.count(OOM_MARKER) != 1 or not body.startswith(OOM_HANDLER):
+            raise ValueError("Modified managed Sage OOM guard")
+        return source
+    expected = '''        if "illegal memory access" in str(e).lower() or "device-side assert" in str(e).lower():
+            record_attention("cuda_error", str(e))
+            raise
+        record_attention("pytorch", str(e))
+'''
+    if not body.startswith(expected):
+        raise ValueError("Modified managed Sage exception handler")
+    lines.insert(handler.lineno, OOM_HANDLER)
+    result = "".join(lines)
     ast.parse(result)
     return result
 
