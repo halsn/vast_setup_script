@@ -523,7 +523,7 @@ index 0000000..79315b4
 +        delete_checkpoint_route
 +    )
 diff --git a/selflift_runtime/nodes.py b/selflift_runtime/nodes.py
-index edf0c60..7106bda 100644
+index edf0c60..dcc1a74 100644
 --- a/selflift_runtime/nodes.py
 +++ b/selflift_runtime/nodes.py
 @@ -13,6 +13,7 @@ Two front-ends share the same engine:
@@ -608,7 +608,7 @@ index edf0c60..7106bda 100644
 +            shape_mismatch = any(
 +                mask.ndim != expected.ndim
 +                or mask.shape[0] != expected.shape[0]
-+                or tuple(mask.shape[2:]) != tuple(expected.shape[2:])
++                or any(size not in (1, target) for size, target in zip(mask.shape[1:], expected.shape[1:]))
 +                for mask, expected in zip(value["streams"], expected_streams)
 +            )
 +        else:

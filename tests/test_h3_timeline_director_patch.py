@@ -266,6 +266,41 @@ def test_timeline_patch_refuses_previous_diff_with_edited_helper(tmp_path, monke
     assert (legacy_repo / LEGACY_HELPER).read_text(encoding="utf-8") == "local edit\n"
 
 
+@pytest.mark.parametrize("tamper", [None, "tracked", "helper", "extra"])
+def test_upgrade_from_audited_full_patch_preserves_unrelated_changes(tmp_path, monkeypatch, tamper):
+    repo, old_patch, helpers, revision = _make_fixture(tmp_path)
+    spec = importlib.util.spec_from_file_location("patch_tool_full_upgrade", PATCH_TOOL)
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    previous, helper_patches = tool._patch_parts(old_patch)
+    monkeypatch.setattr(tool, "PREVIOUS_FULL_PATCH_SHA256", {hashlib.sha256(previous).hexdigest()}, raising=False)
+
+    # Produce a canonical newer tracked patch; helper content is unchanged.
+    for relative in tool.TRACKED_PATCH_PATHS:
+        (repo / relative).write_text("VALUE = 3\n", encoding="utf-8")
+    new_tracked = tool._git(repo, "-c", "core.autocrlf=true", "diff", "--no-ext-diff", "--binary").replace(b"\r\n", b"\n")
+    new_patch = tmp_path / "new.patch"
+    new_patch.write_bytes(new_tracked + b"".join(helper_patches.values()))
+    for relative in tool.TRACKED_PATCH_PATHS:
+        (repo / relative).write_text("VALUE = 2\n", encoding="utf-8")
+    if tamper == "tracked":
+        (repo / "__init__.py").write_text("USER_CHANGE = True\n", encoding="utf-8")
+    elif tamper == "helper":
+        (repo / "selflift_runtime/reference_cache.py").write_text("USER_CHANGE = True\n", encoding="utf-8")
+    elif tamper == "extra":
+        (repo / "user.txt").write_text("keep me\n", encoding="utf-8")
+    before = {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file() and ".git" not in p.parts}
+    if tamper:
+        with pytest.raises(tool.PatchError, match="Refusing"):
+            tool.prepare(repo, new_patch, helpers, revision, REMOTE)
+        assert before == {p.relative_to(repo): p.read_bytes() for p in repo.rglob("*") if p.is_file() and ".git" not in p.parts}
+    else:
+        tool.prepare(repo, new_patch, helpers, revision, REMOTE)
+        assert tool._status(repo) == []
+        tool.apply(repo, new_patch, helpers, revision, REMOTE)
+        assert (repo / "selflift_runtime/nodes.py").read_text(encoding="utf-8") == "VALUE = 3\n"
+
+
 @pytest.mark.parametrize("user_edit", [False, True])
 def test_timeline_patch_upgrade_accepts_only_the_audited_previous_diff(tmp_path, monkeypatch, user_edit):
     repo, _, legacy_helpers, revision = _make_fixture(tmp_path / "legacy", legacy=True)

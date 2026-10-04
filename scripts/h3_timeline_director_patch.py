@@ -35,6 +35,11 @@ PREVIOUS_HELPER_SHA256 = {
     "978f882e7c4e587c48719bc3c4a425e3ff03a7468923316e4a39dd0a97b674c4",
     "8fa4b51eee8183880ca3a59aafa536662f080236d54c81581209610f2b2b6475",
 }
+# Audited four-file/two-helper release immediately before the mask fix.
+# Full upgrades also require helpers to match the current managed sources.
+PREVIOUS_FULL_PATCH_SHA256 = {
+    "6f3f522a0a68bf2fa04e3ccbeb425d623cc80318092ec5388fffb72933b2fa37",
+}
 EXPECTED_PATCH_PATHS = TRACKED_PATCH_PATHS | HELPER_RELATIVE_PATHS
 
 
@@ -236,14 +241,25 @@ def prepare(repo: Path, patch_path: Path, helpers: dict[str, Path], revision: st
         reverse_helpers = b"".join(helper_patches.values())
         remove_legacy_helper = False
     else:
-        previous = _previous_managed_applied(repo)
-        if previous is None:
-            raise PatchError(
-                "Refusing to reset Timeline Director: local changes are not exactly the managed patch"
-            )
-        tracked_patch = previous
-        reverse_helpers = b""
-        remove_legacy_helper = True
+        previous = _git(
+            repo, "-c", "core.autocrlf=true", "diff", "--no-ext-diff", "--binary"
+        ).replace(b"\r\n", b"\n")
+        if (
+            hashlib.sha256(previous).hexdigest() in PREVIOUS_FULL_PATCH_SHA256
+            and _managed_applied(repo, patch_path, helpers, previous)
+        ):
+            tracked_patch = previous
+            reverse_helpers = b"".join(helper_patches.values())
+            remove_legacy_helper = False
+        else:
+            previous = _previous_managed_applied(repo)
+            if previous is None:
+                raise PatchError(
+                    "Refusing to reset Timeline Director: local changes are not exactly the managed patch"
+                )
+            tracked_patch = previous
+            reverse_helpers = b""
+            remove_legacy_helper = True
     if current != revision:
         raise PatchError(
             "Refusing to reset Timeline Director: local changes are not exactly the managed patch"
