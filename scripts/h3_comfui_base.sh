@@ -738,6 +738,76 @@ detect_sageattention() {
   fi
 }
 
+sage_cuda_include_dirs() {
+  "$COMFY_PYTHON" - "$CUDA_HOME" <<'PY'
+import os, sys, sysconfig
+from pathlib import Path
+root = Path(sys.argv[1])
+paths = [root / "include", *sorted(root.glob("targets/*/include"))]
+# NVIDIA pip wheels place library headers outside CUDA_HOME.
+paths += sorted((Path(sysconfig.get_paths()["purelib"]) / "nvidia").glob("*/include"))
+paths += [Path(p) for p in os.environ.get("CPATH", "").split(os.pathsep) if p]
+for path in dict.fromkeys(paths):
+    print(path.as_posix())
+PY
+}
+
+sage_cuda_missing_headers() {
+  local header directory found
+  for header in cuda_runtime.h cuda_fp16.h cublas_v2.h cublasLt.h cusparse.h cusolverDn.h curand_kernel.h; do
+    found=0
+    for directory in "$@"; do
+      if [[ -f "$directory/$header" ]]; then found=1; break; fi
+    done
+    (( found == 1 )) || printf '%s\n' "$header"
+  done
+  return 0
+}
+
+prepare_sage_build_environment() {
+  local nvcc_version includes missing directory
+  local -a include_dirs apt=(apt-get) packages=()
+  if [[ -z "${CUDA_HOME:-}" ]]; then
+    CUDA_HOME="$("$COMFY_PYTHON" -c 'from torch.utils.cpp_extension import CUDA_HOME; print(CUDA_HOME or "")')" || return 1
+  fi
+  [[ -x "${CUDA_HOME:-}/bin/nvcc" ]] || { die "Sage source build requires CUDA_HOME with bin/nvcc; a runtime-only image is insufficient."; return 1; }
+  export CUDA_HOME
+  nvcc_version="$("$CUDA_HOME/bin/nvcc" --version | sed -nE 's/.*release ([0-9]+\.[0-9]+).*/\1/p')"
+  [[ "$nvcc_version" =~ ^[0-9]+\.[0-9]+$ ]] || { die "Cannot determine CUDA compiler version for development packages."; return 1; }
+  includes="$(sage_cuda_include_dirs)" || return 1
+  mapfile -t include_dirs <<< "$includes"
+  missing="$(sage_cuda_missing_headers "${include_dirs[@]}")"
+  if [[ -n "$missing" ]]; then
+    log_warn "CUDA $nvcc_version development headers missing: ${missing//$'\n'/, }"
+    # Match the installed compiler, not nvidia-smi's driver version or latest CUDA.
+    # These are library development packages only; no drivers or Torch replacement.
+    packages=("cuda-cudart-dev-${nvcc_version/./-}" "libcublas-dev-${nvcc_version/./-}"
+      "libcusparse-dev-${nvcc_version/./-}" "libcusolver-dev-${nvcc_version/./-}"
+      "libcurand-dev-${nvcc_version/./-}")
+    command_exists apt-get || { die "Missing CUDA headers ($missing); install matching CUDA development libraries in this image (apt-get unavailable)."; return 1; }
+    if (( EUID != 0 )); then
+      command_exists sudo || { die "Root privileges are required to repair CUDA development headers."; return 1; }
+      apt=(sudo apt-get)
+    fi
+    "${apt[@]}" update || { die "CUDA development package index update failed."; return 1; }
+    DEBIAN_FRONTEND=noninteractive "${apt[@]}" install -y --no-install-recommends "${packages[@]}" \
+      || { die "CUDA $nvcc_version development package installation failed; check the NVIDIA apt repository."; return 1; }
+    includes="$(sage_cuda_include_dirs)" || return 1
+    mapfile -t include_dirs <<< "$includes"
+    missing="$(sage_cuda_missing_headers "${include_dirs[@]}")"
+    [[ -z "$missing" ]] || { die "CUDA headers still missing after package installation: ${missing//$'\n'/, }"; return 1; }
+  fi
+  for directory in "${include_dirs[@]}"; do
+    [[ -d "$directory" ]] || continue
+    CPATH="$directory${CPATH:+:$CPATH}"
+    # Sage's setup.py explicitly forwards these to NVCC and the host compiler.
+    NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-I$directory"
+    CXX_APPEND_FLAGS="${CXX_APPEND_FLAGS:+$CXX_APPEND_FLAGS }-I$directory"
+  done
+  export CPATH NVCC_APPEND_FLAGS CXX_APPEND_FLAGS
+  log_ok "CUDA $nvcc_version development headers verified for Sage source build."
+}
+
 install_sageattention() {
   H3_STAGE="installing SageAttention"
   if [[ "${H3_NO_SAGE:-0}" == "1" ]]; then
@@ -756,7 +826,8 @@ install_sageattention() {
   installed="$("$COMFY_PYTHON" -c 'import importlib.metadata; print(importlib.metadata.version("sageattention"))' 2>/dev/null || true)"
   if [[ "$installed" != "$version" ]]; then
     log_info "Installing SageAttention $version (current: ${installed:-missing}) without changing Torch/CUDA."
-    if ! "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation "sageattention==${version}"; then
+    # A source distribution must not start compiling before the CUDA preflight.
+    if ! "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation --only-binary=:all: "sageattention==${version}"; then
       local source=""
       # Official v2.2.0 release, pinned instead of compiling a moving main branch.
       # Never use this source for an explicitly requested different version.
@@ -764,7 +835,7 @@ install_sageattention() {
         source="git+https://github.com/thu-ml/SageAttention.git@eb615cf6cf4d221338033340ee2de1c37fbdba4a"
         log_warn "SageAttention $version package installation failed; compiling its pinned official source (requires nvcc and matching CUDA)."
       fi
-      if [[ -z "$source" ]] || ! MAX_JOBS="${MAX_JOBS:-4}" "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation "$source"; then
+      if [[ -z "$source" ]] || ! prepare_sage_build_environment || ! MAX_JOBS="${MAX_JOBS:-4}" "$COMFY_PYTHON" -m pip install --no-deps --no-build-isolation "$source"; then
         SAGE_STATUS="not-installed-no-verified-wheel"
         [[ "${H3_SAGE_REQUIRED:-0}" != "1" ]] || die "SageAttention installation failed (package/source). Check CUDA_HOME, nvcc, and the Torch/CUDA match."
         log_warn "SageAttention installation failed; continuing without verified Sage acceleration."

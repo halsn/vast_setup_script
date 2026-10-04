@@ -25,6 +25,7 @@ def test_missing_sage_package_uses_pinned_source_and_preserves_failure_policy(re
 COMFY_PYTHON=fake_python
 H3_SAGE_REQUIRED={required}
 TEST_VERSION=1.0.6
+prepare_sage_build_environment() {{ :; }}
 fake_python() {{
   if [[ "$*" == *"pip install"* ]]; then
     printf 'INSTALL %s\\n' "$*"
@@ -88,6 +89,7 @@ def test_source_fallback_still_requires_kernel_verification():
     run = run_bash(f'''
 COMFY_PYTHON=fake_python
 TEST_VERSION=1.0.6
+prepare_sage_build_environment() {{ :; }}
 fake_python() {{
   if [[ "$*" == *"pip install"* ]]; then
     [[ "$*" == *"git+https://github.com/thu-ml/SageAttention.git@{SAGE_REV}"* ]] || return 1
