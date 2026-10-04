@@ -6,7 +6,7 @@ H3_PREVIEW_METHOD="${H3_PREVIEW_METHOD:-taesd}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"
 # The Workbench supplies its resolved commit so setup-owned companion scripts
 # use the same snapshot as this entry script. Keep a tested pin for standalone runs.
-H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-9e7f378cfbf527a55a8d682c34a685390faa7eae}"
+H3_SETUP_SUPPORT_REV="${H3_SETUP_SUPPORT_REV:-fdc41e7a6395a21e68b0b37a5990418e19aad68a}"
 H3_PROFILE_COMMON_URL="${H3_PROFILE_COMMON_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_profile_common.sh}"
 H3_PROFILE_BASE_URL="${H3_PROFILE_BASE_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_comfui_base.sh}"
 TIMELINE_PATCH_URL="${TIMELINE_PATCH_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/patches/timeline-director/two-phase-checkpoints.patch}"
