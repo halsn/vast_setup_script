@@ -59,6 +59,16 @@ H3_T8_SMOKE_TOOL_DIR="${H3_T8_SMOKE_TOOL_DIR:-/opt/h3-studio-tools}"
 H3_T8_SMOKE_BIN="${H3_T8_SMOKE_BIN:-/usr/local/bin/h3-t8-long-video-smoke}"
 H3_T8_SMOKE_JOB_BIN="${H3_T8_SMOKE_JOB_BIN:-/usr/local/bin/h3-t8-smoke-job}"
 
+H3_INSTALL_VEDA="${H3_INSTALL_VEDA:-1}"
+H3_VEDA_ASSETS_TOOL_URL="${H3_VEDA_ASSETS_TOOL_URL:-https://raw.githubusercontent.com/halsn/vast_setup_script/$H3_SETUP_SUPPORT_REV/scripts/h3_veda_assets.py}"
+
+VEDA_NODE_NAME="Veda-on-ComfyUI"
+VEDA_NODE_REPO="https://github.com/veda-sparse/Veda-on-ComfyUI.git"
+VEDA_NODE_REV="fd59c7277ccc37ebf1a8f6823474b8c2ef2e33a0"
+VEDA_NODE_CLASS="VedaSparseAttention"
+VEDA_PREDICTOR="minimax_h3_t2va_veda_8nfe_600step_preview_fp8.safetensors"
+VEDA_TURBO_LORA="minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"
+
 TIMELINE_NODE_NAME="ComfyUI-MiniMaxH3-TimelineDirector"
 TIMELINE_NODE_REPO="https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector.git"
 TIMELINE_NODE_REV="309b626973d049b073e93557ff94603efc2d1272"
@@ -172,6 +182,45 @@ h3_studio_install_runtime_nodes() {
   fi
   h3_profile_info "Pinned KJNodes + T8 H3 runtime nodes installed for the open-source Studio."
 }
+
+h3_studio_install_veda() {
+  if [[ "$H3_INSTALL_VEDA" != "1" ]]; then
+    h3_profile_info "Veda sparse attention is disabled by H3_INSTALL_VEDA=$H3_INSTALL_VEDA."
+    return 0
+  fi
+
+  local target="$COMFY_DIR/custom_nodes/$VEDA_NODE_NAME"
+  local assets_tool="$SCRIPT_DIR/h3_veda_assets.py"
+  local staged_tool=""
+  if [[ -e "$target" && ! -d "$target/.git" ]]; then
+    h3_profile_error "Existing Veda path is not a git checkout: $target"
+    return 1
+  fi
+  if [[ -d "$target/.git" ]] && [[ -n "$(git -C "$target" status --porcelain)" ]]; then
+    h3_profile_error "Veda checkout has local changes; preserving it and refusing to replace: $target"
+    return 1
+  fi
+  h3_studio_install_pinned_checkout "$VEDA_NODE_NAME" "$VEDA_NODE_REPO" "$VEDA_NODE_REV" "$target"
+  h3_profile_install_requirements "$target"
+
+  if [[ ! -f "$assets_tool" ]]; then
+    staged_tool="$(mktemp)" || return 1
+    if ! curl -fsSL --retry 3 --connect-timeout 15 "$H3_VEDA_ASSETS_TOOL_URL" -o "$staged_tool"; then
+      rm -f "$staged_tool"
+      h3_profile_error "Could not fetch the pinned Veda asset installer."
+      return 1
+    fi
+    assets_tool="$staged_tool"
+  fi
+  if ! "$COMFY_PYTHON" "$assets_tool" "$COMFY_DIR/models"; then
+    [[ -z "$staged_tool" ]] || rm -f "$staged_tool"
+    h3_profile_error "Could not install the pinned Veda predictor and 8-step Turbo LoRA."
+    return 1
+  fi
+  [[ -z "$staged_tool" ]] || rm -f "$staged_tool"
+  h3_profile_info "Pinned Veda attention, predictor, and 8-step Turbo LoRA are installed."
+}
+
 
 h3_studio_install_motion_context_template() {
   local motion_target="$COMFY_DIR/custom_nodes/$MOTION_CONTEXT_NODE_NAME"
@@ -794,6 +843,49 @@ print(
 PY
 }
 
+h3_studio_verify_veda() {
+  if [[ "$H3_INSTALL_VEDA" != "1" ]]; then
+    return 0
+  fi
+  "$COMFY_PYTHON" - "http://127.0.0.1:$COMFY_PORT/object_info" "$VEDA_NODE_CLASS" "$VEDA_PREDICTOR" "$VEDA_TURBO_LORA" <<'PY'
+import json
+import sys
+import urllib.request
+
+url, node_name, predictor_name, turbo_lora_name = sys.argv[1:]
+try:
+    with urllib.request.urlopen(url, timeout=20) as response:
+        catalog = json.load(response)
+except Exception as exc:
+    print(f"[ERROR] Could not read ComfyUI object catalog for Veda: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+def strings(value):
+    found = set()
+    if isinstance(value, str):
+        found.add(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            found.update(strings(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(strings(item))
+    return found
+
+missing = []
+if node_name not in catalog or predictor_name not in strings(catalog.get(node_name)):
+    missing.append("Veda node/predictor")
+if turbo_lora_name not in strings(catalog.get("LoraLoaderModelOnly")):
+    missing.append("8-step H3 Turbo LoRA")
+if missing:
+    print("[ERROR] Veda Studio capability is incomplete: " + ", ".join(missing), file=sys.stderr)
+    raise SystemExit(1)
+
+print("[OK] Veda node, predictor, and 8-step Turbo LoRA are registered", file=sys.stderr)
+PY
+}
+
+
 h3_studio_verify_t8_director() {
   "$COMFY_PYTHON" - \
     "http://127.0.0.1:$COMFY_PORT/object_info" \
@@ -1328,6 +1420,7 @@ main_studio() {
   h3_studio_configure_timeline_model
   h3_profile_prepare_base
   h3_studio_install_runtime_nodes
+  h3_studio_install_veda
   h3_studio_try_install_motion_context
   h3_studio_install_t8_long_video_template
   h3_studio_install_t8_release_smoke_tool
@@ -1340,6 +1433,7 @@ main_studio() {
   # Restart ComfyUI after the Studio-only custom nodes are installed, then
   # verify the advanced Timeline Director contract before starting the WebUI.
   h3_profile_finish
+  h3_studio_verify_veda
   h3_studio_verify_motion_context_smoke
   h3_studio_verify_webui_node_contract
   h3_studio_verify_t8_director
